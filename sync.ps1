@@ -37,7 +37,7 @@ $Target = Resolve-Path $TargetPath
 function DebugString { Param($Object)
     if($Object -eq $null) { ""; return }
 
-    switch($Object.GetType().Name) {
+    switch($Object.GetType().Name) {        
         "DictionaryEntry" {
             $name = "$($Object.Name)"
             $value = "$($Object.Value)"
@@ -48,9 +48,13 @@ function DebugString { Param($Object)
         "PathInfo" {
             "$($Object.Path)"
         }
+        "String" {
+            $Object
+         }
 
         default {
-            "DebugString: unknown Type $($Object.GetType().FullName)"            
+            Write-Debug "DebugString: unknown Type $($Object.GetType().FullName)"            
+            "$Object"
         }
     }
 }
@@ -60,7 +64,7 @@ function DebugVar {
     if(-not $Debug) { return }
 
     if($Value -eq $null) { $Value = (ls variable:$Name).Value }
-    if(($Value.GetType().FullName -ne 'System.String') -and ($Value.GetEnumerator -is [System.Management.Automation.PSMethodInfo])) {
+    if(($Value -ne $null) -and ($Value.GetType().FullName -ne 'System.String') -and ($Value.GetEnumerator -is [System.Management.Automation.PSMethodInfo])) {
         $enumerator = $Value.GetEnumerator()
         $enumerator.MoveNext()
         Write-Debug "$(("$" + $Name).PadRight($DebugIndent)): $(DebugString $enumerator.Current)"	
@@ -117,25 +121,33 @@ DebugVar Source
 DebugVar Target
 
 $sourceFiles = @{}
-ls -Recurse -File $Source | New-HashedFile $Source | %{ if(-not $sourceFiles.ContainsKey($_.Hash)) { $sourceFiles.Add($_.Hash, $_) } }
-
+$files = ls -Recurse -File $Source
+if($files) {
+    $files | New-HashedFile $Source | %{ if(-not $sourceFiles.ContainsKey($_.Hash)) { $sourceFiles.Add($_.Hash, $_) } }
+}
 DebugVar sourceFiles
 
 $latestFolder = Join-Path $Target '_latest'
+DebugVar latestFolder
+if(-not (Test-Path $latestFolder)) { New-Item -ItemType Directory -Path $latestFolder | Out-Null }
+
 $backupFolder = Join-Path $Target "$(Get-Date -Format 'yyyyMMdd')"
 while (Test-Path $backupFolder) {
     if($backupFolder -match '\.(\d+)$'){
-        $nextRevision = $Matches[1] + 1;
-        $backupFolder -replace '\.\d+$', ".$nextRevision"
+        $nextRevision = [int]$Matches[1] + 1;
+        $backupFolder = $backupFolder -replace '\.\d+$', ".$nextRevision"
     }
     else {
         $backupFolder += '.1'
     }
 }
+DebugVar backupFolder
+New-Item -ItemType Directory -Path $backupFolder | Out-Null 
 
 $targetFiles = @{}
-if(-not (Test-Path $latestFolder)) { New-Object }
-ls -Recurse -File $latestFolder | New-HashedFile $latestFolder -ReadHashFromFile | %{ $targetFiles.Add($_.RelativePath, $_) }
+$files = ls -Recurse -File $latestFolder
+if($files) {
+    $files | New-HashedFile $latestFolder -ReadHashFromFile | %{ $targetFiles.Add($_.RelativePath, $_) }
+}
 
-
-DebugVar targetFiles 
+DebugVar targetFiles
