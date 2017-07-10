@@ -38,22 +38,25 @@ function DebugString { Param($Object)
     if($Object -eq $null) { ""; return }
 
     switch($Object.GetType().Name) {        
-        "DictionaryEntry" {
+        'DictionaryEntry' {
             $name = "$($Object.Name)"
             $value = "$($Object.Value)"
             if($name.Length -gt 30) { $name = $name.SubString(0,30) + '...' }
             if($value.Length -gt 30) { $value = $value.SubString(0,30) + '...' }
             "$($name): $value"            
         }
-        "PathInfo" {
+        'PathInfo' {
             "$($Object.Path)"
         }
-        "String" {
+        'String' {
             $Object
+         }
+         'SwitchParameter' {
+            "$Object"             
          }
 
         default {
-            Write-Debug "DebugString: unknown Type $($Object.GetType().FullName)"            
+            Write-Verbose "DebugString: unknown Type $($Object.GetType().FullName)"            
             "$Object"
         }
     }
@@ -79,7 +82,7 @@ function DebugVar {
 
 function New-HashedFile {
     Param( 
-        [Parameter(ValueFromPipeline=$true)]
+        [Parameter(Mandatory=$true, Position=0)]
         [System.IO.FileInfo]
         $File, 
         
@@ -89,32 +92,33 @@ function New-HashedFile {
 
         [Parameter()]
         [switch]
-        $ReadHashFromFile=$false
+        $ReadInfoFromFile=$false
     )
-    Begin { }
-    Process {
-        #DebugVar File $File.FullName
-        #DebugVar Source
-        #DebugVar ReadHashFromFile
+    DebugVar File $File.FullName
+    DebugVar Source
+    DebugVar ReadInfoFromFile
 
-        $result = New-Object PSObject
-        $result | Add-Member -MemberType NoteProperty -Name 'File' -Value $File    
+    $result = New-Object PSObject
+    $relativePath = $File.Directory.FullName.Remove(0, $Source.Path.Length)
+    if($relativePath.Length -eq 0) { $relativePath = '.' }
+    DebugVar relativePath
+    $result | Add-Member -MemberType NoteProperty -Name 'RelativePath' -Value (Join-Path $relativePath $File.Name)       
 
-        $pathFromSource = $File.Directory.FullName.Remove(0, $Source.Path.Length)
-        if($pathFromSource.Length -eq 0) { $pathFromSource = '.' }
-        #DebugVar pathFromSource
-        $result | Add-Member -MemberType NoteProperty -Name 'RelativePath' -Value $pathFromSource        
-
-        if($ReadHashFromFile) {
-            $result | Add-Member -MemberType NoteProperty -Name 'Hash' -Value (gc $File.FullName)[0]
-        }
-        else { 
-            $result | Add-Member -MemberType NoteProperty -Name 'Hash' -Value (Get-FileHash $File.FullName).Hash
-        }
-
-        $result
+    if($ReadInfoFromFile) {
+        $info = gc $file.FullName
+        DebugVar info
+        DebugVar info $info[0]
+        DebugVar info $info[1]
+        #TODO: Sanity-check _latest file content
+        $result | Add-Member -MemberType NoteProperty -Name 'Hash' -Value $info[0]
+        $result | Add-Member -MemberType NoteProperty -Name 'File' -Value (ls $info[1])
     }
-    End { }
+    else {
+        $result | Add-Member -MemberType NoteProperty -Name 'Hash' -Value (Get-FileHash $File.FullName).Hash
+        $result | Add-Member -MemberType NoteProperty -Name 'File' -Value $File 
+    }
+
+    $result
 }
 
 DebugVar Source
@@ -122,14 +126,21 @@ DebugVar Target
 
 $sourceFiles = @{}
 $files = ls -Recurse -File $Source
-if($files) {
-    $files | New-HashedFile $Source | %{ if(-not $sourceFiles.ContainsKey($_.Hash)) { $sourceFiles.Add($_.Hash, $_) } }
+foreach($file in $files) {
+    $hashedFile = New-HashedFile $file $Source
+    if($sourceFiles.ContainsKey($hashedFile.Hash)) {
+        Write-Warning "Duplicate source file: Will not Backup $($hashedFile.File.FullName), because the same file $($sourceFiles[$hashedFile.Hash].File.FullName) is (already) being backed up."
+    }
+    else {
+        $sourceFiles.Add($hashedFile.Hash, $hashedFile)              
+    }
 }
 DebugVar sourceFiles
 
 $latestFolder = Join-Path $Target '_latest'
 DebugVar latestFolder
 if(-not (Test-Path $latestFolder)) { New-Item -ItemType Directory -Path $latestFolder | Out-Null }
+$latestFolder = Resolve-Path $latestFolder
 
 $backupFolder = Join-Path $Target "$(Get-Date -Format 'yyyyMMdd')"
 while (Test-Path $backupFolder) {
@@ -146,8 +157,55 @@ New-Item -ItemType Directory -Path $backupFolder | Out-Null
 
 $targetFiles = @{}
 $files = ls -Recurse -File $latestFolder
-if($files) {
-    $files | New-HashedFile $latestFolder -ReadHashFromFile | %{ $targetFiles.Add($_.RelativePath, $_) }
+foreach($file in $files) {
+    $hashedFile = New-HashedFile $file $latestFolder -ReadInfoFromFile
+    $targetFiles.Add($hashedFile.RelativePath, $hashedFile) 
+}
+DebugVar targetFiles
+
+foreach($sourceFile in $sourceFiles.Values) {
+    Write-Debug "handling $($sourceFile.RelativePath)"
+
+    if($targetFiles.ContainsKey($sourceFile.RelativePath)){
+        Write-Verbose "$($sourceFile.RelativePath) is already backed up"
+        if($targetFiles[$sourceFile.RelativePath].Hash -eq $sourceFile.Hash) {
+            Write-Information "$($sourceFile.RelativePath) is already backed up (latest version)"
+            $targetFiles.Remove($sourceFile.RelativePath)
+            continue;
+        }        
+        # newer version available
+    }
+
+    $latestFile = (Join-Path $latestFolder $sourceFile.RelativePath)
+    $backupFile = (Join-Path $backupFolder $sourceFile.RelativePath)
+    DebugVar latestFile
+    DebugVar backupFile
+
+    if(-not (Test-Path $latestFile)) { New-Item -ItemType File -Path $latestFile -Force | Out-Null }
+    if(-not (Test-Path $backupFile)) { New-Item -ItemType File -Path $backupFile -Force | Out-Null }
+    
+    cp $sourceFile.File.FullName $backupFile
+    $backupFile = Resolve-Path $backupFile
+    $sourceFile.Hash > $latestFile
+    "$backupFile" >> $latestFile
+
+    if($targetFiles.ContainsKey($sourceFile.RelativePath)) { $targetFiles.Remove($sourceFile.RelativePath) }
 }
 
-DebugVar targetFiles
+foreach($targetFile in $targetFiles.Values) {
+    if($sourceFiles.ContainsKey($targetFile.Hash)) {
+        Write-Verbose "$($targetFile.RelativePath) has been moved to $($sourceFiles[$targetFile.Hash].RelativePath)"
+    }
+    else {
+        Write-Verbose "$($targetFile.RelativePath) has been deleted"
+    }
+    
+    $latestFile = (Join-Path $latestFolder $targetFile.RelativePath)
+    $backupFile = (Join-Path $backupFolder $targetFile.RelativePath)
+    DebugVar latestFile
+    DebugVar backupFile
+
+    if(-not (Test-Path $backupFile)) { New-Item -ItemType File -Path $backupFile -Force | Out-Null }
+    "_destroyed" > $backupFile
+    rm $latestFile
+}
