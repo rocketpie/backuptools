@@ -24,81 +24,71 @@ Param(
 	$TargetPath = 'C:\D\tmp\test\target'
 )
 
-$BackupFolderName = Get-Date -Format 'yyyyMMdd'
-$JournalFileName = "$BackupFolderName-journal"
-$DebugIndent = 18
+# Preparation ============================================================================================
+# ========================================================================================================
 $Debug = $false
-if($PSBoundParameters['Debug']){
-	$DebugPreference = 'Continue'
+if($PSBoundParameters['Debug']){ 
+	$DebugPreference = 'Continue'	
 	$Debug = $true
 }
 
-function DebugString { Param($Object)
-	if($Object -eq $null) { ""; return }
-
-	switch($Object.GetType().Name) {        
-		'DictionaryEntry' {
-			$name = "$($Object.Name)"
-			$value = "$($Object.Value)"
-			if($name.Length -gt 30) { $name = $name.SubString(0,30) + '...' }
-			if($value.Length -gt 30) { $value = $value.SubString(0,30) + '...' }
-			"$($name): $value"            
-		}
-		'PathInfo' {
-			"$($Object.Path)"
-		}
-		'String' {
-			$Object
-		 }
-		 'SwitchParameter' {
-			"$Object"             
-		 }
-
-		default {
-			Write-Verbose "DebugString: unknown Type $($Object.GetType().FullName)"            
-			"$Object"
-		}
+$Source = Resolve-Path $SourcePath
+$Target = Resolve-Path $TargetPath
+$latestFolder = Join-Path $Target '_latest'
+$JournalFolder = Join-Path $Target '_journal'
+$backupFolder = Join-Path $Target "$(Get-Date -Format 'yyyyMMdd').1"
+while (Test-Path $backupFolder) {
+	if($backupFolder -match '\.(\d+)$' ) { 
+		$backupFolder = $backupFolder -replace '\.\d+$', ".$([int]$Matches[1] + 1)"
 	}
 }
+if(-not (Test-Path $latestFolder)) { New-Item -ItemType Directory -Path $latestFolder | Out-Null }
+if(-not (Test-Path $JournalFolder)) { New-Item -ItemType Directory -Path $JournalFolder | Out-Null }
+New-Item -ItemType Directory -Path $backupFolder | Out-Null 
 
-function DebugVar { 
-	Param($Name, $Value)
-	if(-not $Debug) { return }
-
-	if($Value -eq $null) { $Value = (ls variable:$Name).Value }
-	if(($Value -ne $null) -and ($Value.GetType().FullName -ne 'System.String') -and ($Value.GetEnumerator -is [System.Management.Automation.PSMethodInfo])) {
-		$enumerator = $Value.GetEnumerator()
-		$enumerator.MoveNext() | Out-Null
-		Write-Debug "$(('$' + $Name).PadRight($DebugIndent)): $(DebugString $enumerator.Current)"	
-		while($enumerator.MoveNext()) {
-			Write-Debug "$(''.PadRight($DebugIndent)): $(DebugString $enumerator.Current)"	
-		}
-	}
-	else {
-		Write-Debug "$(('$' + $Name).PadRight($DebugIndent)): $(DebugString $Value)"	
+$journal = Join-Path $JournalFolder $backupFolder.Remove(0, $Target.Length)
+function Log ($Message) {
+	$Message >> $journal
+}
+function Debug ($Message) {
+	if($Debug) {
+		Log $Message
 	}
 }
+function Debug ([String]$Message) {
+	Log $Message
+	Write-Warning $Message
+}
+
+
+Log "$(Get-Date -Format 'yyyy-MM-dd:HH-mm-ss') backing up '$Source' to '$Target'"
+
+# $shorten = [System.Text.RegularExpressions.Regex]::new('.{0,30}', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+# function DebugString ($Object) {
+# 	if($Object -eq $null) { ""; return }
+# 	switch($Object.GetType().Name) {        
+# 		'DictionaryEntry' {	$shorten.Match($Object.Name).Value +': ' +$shorten.Match((DebugString $Object.Value)).Value	}
+# 		'PathInfo'        { "$($Object.Path)" }
+# 		'String'          { $Object }
+# 		default           { "$Object" }
+# 	}
+# }
+
+# function DebugVar ($Name, $Value) { if(-not $Debug) { return }
+# 	if($Value -eq $null) { $Value = (ls variable:$Name).Value; if($Value -eq $null) { return; } }  #try to get variable by name 
+# 	if(($Value.GetType().Name -eq 'String') -or ($Value.GetEnumerator -eq $null)) { $Value = @($Value) } # normalize to enumerable
+# 	$enumerator = $Value.GetEnumerator(); $enumerator.MoveNext() | Out-Null
+# 	do {
+# 		Write-Debug "$(('$' + $Name).PadRight(18)): $(DebugString $enumerator.Current)"	
+# 	} while($enumerator.MoveNext());
+# }
 
 function New-HashedFile {
-	Param( 
-		[Parameter(Mandatory=$true, Position=0)]
-		[System.IO.FileInfo]
-		$File, 
-		
-		[Parameter(Mandatory=$true, Position=1)]
-		[System.Management.Automation.PathInfo]
-		$Source, 
-
-		[Parameter()]
-		[switch]
-		$ReadInfoFromFile=$false
+	Param( [Parameter(Mandatory=$true, Position=0)][System.IO.FileInfo] $File, 
+		   [Parameter(Mandatory=$true, Position=1)][System.Management.Automation.PathInfo]$Source, 
+		   [Parameter()]                           [switch] $ReadInfoFromFile = $false
 	)
 	
-	#Write-Debug 'New-HashedFile'
-	#DebugVar File $File.FullName
-	#DebugVar Source
-	#DebugVar ReadInfoFromFile
-
 	$result = New-Object PSObject
 	$relativePath = $File.Directory.FullName.Remove(0, $Source.Path.Length)
 	if($relativePath.Length -eq 0) { $relativePath = '.' }
@@ -120,44 +110,21 @@ function New-HashedFile {
 	$result
 }
 
-$Source = Resolve-Path $SourcePath
-$Target = Resolve-Path $TargetPath
-DebugVar Source
-DebugVar Target
+# Check _latest integrity ============================================================================================
+# ========================================================================================================
 
-# Determine and prepare backup location
-$backupFolder = Join-Path $Target $BackupFolderName
-$revision = 0;
-while (Test-Path $backupFolder) {
-	if($backupFolder -match '\.(\d+)$'){
-		$revision = [int]$Matches[1] + 1;
-		$backupFolder = $backupFolder -replace '\.\d+$', ".$revision"
-	}
-	else {
-		$backupFolder += '.1'
-	}
-}
-if($revision -gt 0) { $JournalFileName = "$JournalFileName.$revision" }
-New-Item -ItemType Directory -Path $backupFolder | Out-Null 
-DebugVar backupFolder
-
-$latestFolder = Join-Path $Target '_latest'
-if(-not (Test-Path $latestFolder)) { New-Item -ItemType Directory -Path $latestFolder | Out-Null }
-$latestFolder = Resolve-Path $latestFolder
-DebugVar latestFolder
-
-$journalFile = Join-Path $Target $JournalFileName
-DebugVar journalFile
-
-Get-Date -Format 'yyyy-MM-dd:HH-mm-ss' > $JournalFile
-"$('backupFolder'.PadRight($DebugIndent)): $backupFolder" >> $JournalFile
-"$('latestFolder'.PadRight($DebugIndent)): $latestFolder" >> $JournalFile
-
-# check _latest state
+$expectedLatestHash = gc (Join-Path $Target '_latest')
 $actualLatestHash = .\Get-DirectoryHash.ps1 $latestFolder -HashBehaviour ContentAndPath
-DebugVar actualLatestHash
 
+Log "_latest: $actualLatestHash, should be $expectedLatestHash"
 
+if(($expectedLatestHash -ne $null) -and ($expectedLatestHash -ne $actualLatestHash)) {
+	Log "TODO: recover? rescan? what?"
+	Exit
+}
+
+# Read $Source ============================================================================================
+# ========================================================================================================
 
 # Read files in $Source
 $sourceFiles = @{}
@@ -165,20 +132,20 @@ $files = ls -Recurse -File $Source
 foreach($file in $files) {
 	$hashedFile = New-HashedFile $file $Source
 	if($sourceFiles.ContainsKey($hashedFile.Hash)) {
-		Write-Warning "Duplicate source file: Will not Backup $($hashedFile.File.FullName), because the same file $($sourceFiles[$hashedFile.Hash].File.FullName) is (already) being backed up."
+		Log "TODO: add a _latest with a RelativePath pointing to the backed up file?"
+		Warn "Duplicate source file: Will not Backup $($hashedFile.File.FullName), because the same file $($sourceFiles[$hashedFile.Hash].File.FullName) is (already) being backed up."
 	}
 	else {
 		$sourceFiles.Add($hashedFile.Hash, $hashedFile)              
 	}
 }
-#DebugVar sourceFiles
-
+Debug $sourceFiles
 
 $targetFiles = @{}
 $files = ls -Recurse -File $latestFolder
 foreach($file in $files) {
 	$hashedFile = New-HashedFile $file $latestFolder -ReadInfoFromFile
-	$targetFiles.Add($hashedFile.RelativePath, $hashedFile) 
+	$targetFiles.Add($hashedFile.Hash, $hashedFile) 
 }
 
 DebugVar targetFiles
