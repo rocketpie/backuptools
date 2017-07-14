@@ -31,6 +31,7 @@ if($Debug){ $DebugPreference = 'Continue' }
 
 $Source = Resolve-Path $SourcePath
 $Target = Resolve-Path $TargetPath
+$ignoreFile = Join-Path $Target '_ignore'
 $latestFolder = Join-Path $Target '_latest'
 $JournalFolder = Join-Path $Target '_journal'
 $backupFolder = Join-Path $Target "$(Get-Date -Format 'yyyyMMdd').1"
@@ -69,6 +70,10 @@ function Debug ($Message) {
 function Warn ($Message) {
 	Log "`nWARNING: $($Message | Out-String -Stream)"
 	Write-Warning ($Message | Out-String)
+}
+function Error ($Message) {
+	Log "`nERROR: $($Message | Out-String -Stream)"
+	Write-Error ($Message | Out-String)
 }
 
 Log "$(Get-Date -Format 'yyyy-MM-dd:HH-mm-ss') backing up '$Source' to '$Target'"
@@ -134,6 +139,26 @@ foreach($file in $files) {
 	$targetFiles.Add($file.FullName.Remove(0, $latestFolder.Path.Length), $file)
 }
 
+if([System.IO.File]::Exists($ignoreFile)) {
+	Log "_ignore file found"
+	foreach	($entry in (gc $ignoreFile)) { 
+		if(($entry[0] -eq '/') -or ($entry[0] -eq '\')) {
+			$entry = $entry.Remove(0, 1)
+		}
+		$ignoreFiles = @((ls -r ($Source.Path + '\' + $entry)))
+		Debug "_ignore '$entry': $($ignoreFiles.Length) files"
+
+		foreach ($file in $ignoreFiles) {
+			$key = $file.FullName.Remove(0, $Source.Path.Length)
+			if(-not $sourceFiles.ContainsKey($key)) { Error "cannot _ignore '$key': not found" }
+			else {
+				Verbose "_ignore '$file'"
+				$sourceFiles.Remove($key)
+			}
+		}
+	}
+}
+
 $allfiles = $sourceFiles.Keys + @($targetFiles.Keys)
 $allfiles = $allfiles | sort | Get-Unique
 Verbose $allfiles
@@ -167,7 +192,7 @@ foreach($file in $allfiles) {
 		$newcnt++; continue;
 	}
 		
-	if(-not [System.IO.File]::Exists($oldBackupFile)) { Write-Error "backup file missing: '$oldBackupFile'"; Exit; }
+	if(-not [System.IO.File]::Exists($oldBackupFile)) { Error "backup file missing: '$oldBackupFile'"; Exit; }
 	if(-not (Compare $sourceFiles[$file] (ls $oldBackupFile))) {
 		Verbose "'$(Join-Path $Source $file)' has been modified since the latest backup"
 		Log "updating $file"

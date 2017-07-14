@@ -9,6 +9,11 @@ Param(
     $Target = 'C:\D\tmp\test\target'
 )
 
+$Debug = $false; if($PSBoundParameters['Debug']) { $Debug = $true }
+if($Debug){ $DebugPreference = 'Continue' }
+
+$jid = 0
+$next = -1
 $testContent = [String[]]::new(100)
 for( $i = 0; $i -lt $testContent.Length; $i++){
     $testContent[$i] = [guid]::NewGuid().ToString() 
@@ -36,31 +41,33 @@ mkdir $Target | Out-Null
 # =====================================================================================================================
 
 # Prepare some Test data
-$testContent[0] > (join-path $Source 'root dir file.txt')         
+$testContent[($next++)] > (join-path $Source 'root dir file.txt')         
 
 mkdir (join-path $Source 'subfolder') | Out-Null
-$testContent[1] > (join-path $Source (join-path 'subfolder' 'subfolder file.txt'))
+$testContent[($next++)] > (join-path $Source (join-path 'subfolder' 'subfolder file.txt'))
 
 Test ((ls $Target).Length -eq 0) "empty '$Target' before testing"
-Create-Backup $Source $Target
+$jid++; Create-Backup $Source $Target
 Test ((ls -r $Target).Length -eq 11) 'expect right number of files after initial backup' # _journal and dir, _latest, content (3) and checksum, backup and content 
 
 # Add/rm dirs/files ===================================================================================================
 # =====================================================================================================================
 
 #add new file
-$testContent[3] > (join-path $Source 'new file.txt')         
+$testContent[($next++)] > (join-path $Source 'new file.txt')         
 
 # deleted file
 rm (join-path $Source 'root dir file.txt')   
 
-Create-Backup $Source $Target
+$jid++; Create-Backup $Source $Target
+Write-Debug $jid
 Test (-not [System.IO.File]::Exists((join-path $Target '_latest\root dir file.txt'))) '_latest entry is removed'
-Test ((ls -r $Target | ?{ $_.FullName -match '_journal.+\.2' } | gc | Select-String 'removed 1 files, added 1 files, updated 0 files').Length -eq 1) "journal reflects changes"  
+Test ((ls -r $Target | ?{ $_.FullName -match "_journal.+\.$jid" } | gc | Select-String -SimpleMatch 'removed 1 files, added 1 files, updated 0 files').Length -eq 1) "journal tracks removed / added files" 
 
 # add/rm subdir 
 # add/rm new file in subdir 
 # add/rm new file in new subdir 
+# debug and verbose output
 
 # update files ========================================================================================================
 # =====================================================================================================================
@@ -69,3 +76,16 @@ Test ((ls -r $Target | ?{ $_.FullName -match '_journal.+\.2' } | gc | Select-Str
 # move file inside dir
 # move file across dir (up/down)
 # move dir
+# debug and verbose output
+
+# hidden files, .git, ...
+# debug and verbose output
+
+$testContent[($next++)] > (join-path $Source 'ignored file.txt')     
+'ignored file.txt' > (Join-Path $Target '_ignore')
+$jid++; Create-Backup $Source $Target -Debug -Verbose *>&1 | Out-Null
+Test (-not [System.IO.File]::Exists((Join-Path $Target 'ignored file.txt'))) '_ignored file is not backed up'
+Test ((ls -r $Target | ?{ $_.FullName -match "_journal.+\.$jid" } | gc | Select-String "VERBOSE: _ignore '.+?ignored file.txt'").Length -eq 1) 'verbose lists ignored file'
+
+# ignore directories
+# debug and verbose output
