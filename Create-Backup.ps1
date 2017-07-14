@@ -13,15 +13,13 @@
 #>
 [CmdletBinding()]
 Param(
-	#[Parameter(Mandatory=$true)]
-	[Parameter()]
+	[Parameter(Mandatory=$true)]
 	[string]
-	$SourcePath = 'C:\D\tmp\test\src',
+	$SourcePath,
 
-	#[Parameter(Mandatory=$true)]
-	[Parameter()]
+	[Parameter(Mandatory=$true)]
 	[string]
-	$TargetPath = 'C:\D\tmp\test\target'
+	$TargetPath
 )
 
 # Preparation ========================================================================================================
@@ -100,7 +98,7 @@ function WriteBackupFile ($sourceFile, $relativeFileName) {
 		if(-not (Test-Path (Split-Path $latestFile))) { New-Item -ItemType Directory -Path (Split-Path $latestFile) | Out-Null }
 		
 		$backupFile > $latestFile
-		(Get-FileHash $sourceFiles[$file].FullName).Hash >> $latestFile
+		(Get-FileHash $sourceFile.FullName).Hash >> $latestFile
 }
 
 # Check _latest integrity ============================================================================================
@@ -109,7 +107,7 @@ function WriteBackupFile ($sourceFile, $relativeFileName) {
 if([System.IO.File]::Exists((Join-Path $Target '_latestState'))) {
 	$expectedLatestHash = gc (Join-Path $Target '_latestState')
 }
-$actualLatestHash = .\Get-DirectoryHash.ps1 $latestFolder -HashBehaviour ContentAndPath
+$actualLatestHash = Get-DirectoryHash $latestFolder -HashBehaviour ContentAndPath
 
 
 if(($expectedLatestHash -ne $null) -and ($expectedLatestHash -ne $actualLatestHash)) {
@@ -186,7 +184,7 @@ foreach($file in $allfiles) {
 # Finish up ==========================================================================================================
 # ====================================================================================================================
 
-$actualLatestHash = .\Get-DirectoryHash.ps1 $latestFolder -HashBehaviour ContentAndPath
+$actualLatestHash = Get-DirectoryHash $latestFolder -HashBehaviour ContentAndPath
 $actualLatestHash > (Join-Path $Target '_latestState')
 
 Log "removed $rmcnt files, added $newcnt files, updated $updcnt files since last backup"
