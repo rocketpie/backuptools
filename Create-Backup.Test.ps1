@@ -47,7 +47,7 @@ mkdir (join-path $Source 'subfolder') | Out-Null
 $testContent[($next++)] > (join-path $Source (join-path 'subfolder' 'subfolder file.txt'))
 
 Test ((ls $Target).Length -eq 0) "empty '$Target' before testing"
-$jid++; Create-Backup $Source $Target
+$jid++; Create-Backup $Source $Target | Out-Null
 Test ((ls -r $Target).Length -eq 11) 'expect right number of files after initial backup' # _journal and dir, _latest, content (3) and checksum, backup and content 
 
 # Add/rm dirs/files ===================================================================================================
@@ -59,7 +59,7 @@ $testContent[($next++)] > (join-path $Source 'new file.txt')
 # deleted file
 rm (join-path $Source 'root dir file.txt')   
 
-$jid++; Create-Backup $Source $Target
+$jid++; Create-Backup $Source $Target | Out-Null
 Write-Debug $jid
 Test (-not [System.IO.File]::Exists((join-path $Target '_latest\root dir file.txt'))) '_latest entry is removed'
 Test ((ls -r $Target | ?{ $_.FullName -match "_journal.+\.$jid" } | gc | Select-String -SimpleMatch 'removed 1 files, added 1 files, updated 0 files').Length -eq 1) "journal tracks removed / added files" 
@@ -83,7 +83,7 @@ Test ((ls -r $Target | ?{ $_.FullName -match "_journal.+\.$jid" } | gc | Select-
 
 $testContent[($next++)] > (join-path $Source 'ignored file.txt')     
 'ignored file.txt' > (Join-Path $Target '_ignore')
-$jid++; Create-Backup $Source $Target -Debug -Verbose *>&1 | Out-Null
+$jid++; Create-Backup $Source $Target -Debug -Verbose | Out-Null
 Test (-not [System.IO.File]::Exists((Join-Path $Target 'ignored file.txt'))) '_ignored file is not backed up'
 Test ((ls -r $Target | ?{ $_.FullName -match "_journal.+\.$jid" } | gc | Select-String "VERBOSE: _ignore '.+?ignored file.txt'").Length -eq 1) 'verbose lists ignored file'
 
