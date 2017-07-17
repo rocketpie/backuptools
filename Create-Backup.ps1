@@ -180,6 +180,8 @@ function Main () {
 	$allfiles = $sourceFiles.Keys + @($latestFiles.Keys)
 	$allfiles = $allfiles | sort | Get-Unique
 
+	# TODO: move _latest to $version_latest to be able to restore prior?
+
 	"Applying changes to backup Target..." # ==========================================================================================
 # ====================================================================================================================
 
@@ -231,6 +233,8 @@ function Main () {
 
 	$actualLatestHash = Get-DirectoryHash $latestDirectory -HashBehaviour ContentAndPath
 	$actualLatestHash > $latestStateFile
+
+	# TODO: also backup _ignore file ?
 
 	"removed $rmcnt files, added $newcnt files, updated $updcnt files since last backup"
 	"$($Error.Count) error(s)"
