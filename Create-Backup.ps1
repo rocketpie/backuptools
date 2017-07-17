@@ -35,8 +35,23 @@ Param(
 # ====================================================================================================================
 $priorErrorCount = $Error.Count
 
-function EnsureDirectoryExists ($VarName) {
-	$path = (ls variable:$VarName).Value
+function ReadDirectory ($directory) {
+	$result = @{}
+	$files = ls -Recurse -File $directory
+	foreach($file in $files) {
+		$result.Add($file.FullName.Remove(0, $directory.Path.Length), $file)
+	}
+
+	Write-Host "found $($result.Count) files in $directory"
+	Write-Verbose ($result.Keys | Out-String)
+
+	$result
+}
+
+function EnsureDirectoryExists ($VarName, $path = $null) {
+	if($path -eq $null) {
+		$path = (ls variable:$VarName).Value
+	}
 	if(($path -ne $null) -and $path.GetType().Name -ne 'String') { Write-Error "FATAL: invalid variable name '$VarName'"; Exit }  
 	if(-not (Test-Path -LiteralPath $path)) { 
 		Write-Debug "creating $VarName '$path'"	
@@ -60,15 +75,15 @@ function CompareFiles ($fileA, $fileB, $fileBHash) {
 }
 
 function WriteBackupFile ($sourceFile, $backupFile, $latestFile) {		
-		if(-not (Test-Path -LiteralPath (Split-Path $backupFile))) { New-Item -ItemType Directory -Path (Split-Path $backupFile) | Out-Null }
-		if(-not (Test-Path -LiteralPath (Split-Path $latestFile))) { New-Item -ItemType Directory -Path (Split-Path $latestFile) | Out-Null }
+	EnsureDirectoryExists 'directory' (Split-Path $backupFile)	
+	EnsureDirectoryExists 'directory' (Split-Path $latestFile)	
 		
-		[System.IO.File]::Copy($sourceFile.FullName, $backupFile)
+	[System.IO.File]::Copy($sourceFile.FullName, $backupFile)
 		
-		if([System.IO.File]::Exists($latestFile)) {
-			[System.IO.File]::Delete($latestFile)
-		}
-		New-Item -ItemType File -Path $latestFile -Value "$backupFile`n$((Get-FileHash -LiteralPath $sourceFile.FullName).Hash)" | Out-Null
+	if([System.IO.File]::Exists($latestFile)) {
+		[System.IO.File]::Delete($latestFile)
+	}
+	New-Item -ItemType File -Path $latestFile -Value "$backupFile`n$((Get-FileHash -LiteralPath $sourceFile.FullName).Hash)" | Out-Null
 }
 
 # Preparation ========================================================================================================
@@ -130,22 +145,9 @@ function Main () {
 # ====================================================================================================================
 
 	# Read files in $Source
-	$sourceFiles = @{}
-	$files = ls -Recurse -File $Source 
-	foreach($file in $files) {
-		$sourceFiles.Add($file.FullName.Remove(0, $Source.Path.Length), $file)
-	}
-	"found $($sourceFiles.Count) files in $Source"
-	Write-Verbose ($sourceFiles.Keys | Out-String)
-
-	$latestFiles = @{}
-	$files = ls -Recurse -File $latestDirectory
-	foreach($file in $files) {
-		$latestFiles.Add($file.FullName.Remove(0, $latestDirectory.Path.Length), $file)
-	}
-	"found $($latestFiles.Count) files in $latestDirectory"
-	Write-Verbose ($latestFiles.Keys | Out-String)
-
+	[hashtable]$sourceFiles = ReadDirectory $Source
+	[hashtable]$latestFiles = ReadDirectory $latestDirectory
+ 
 	"Checking _ignore file..." # =======================================================================================
 
 	$ignorecnt = 0;
@@ -235,4 +237,4 @@ function Main () {
 	"updated _latestState: '$actualLatestHash'"
 	"Done"
 }
-Main *>&1 | %{ $_; $_ >> $journalFile } 
+Main *>&1 | %{ $_; $_ >> $journalFile }
