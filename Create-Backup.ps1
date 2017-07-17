@@ -33,6 +33,16 @@ Param(
 
 # Functions ========================================================================================================
 # ====================================================================================================================
+$priorErrorCount = $Error.Count
+
+function EnsureDirectoryExists ($VarName) {
+	$path = (ls variable:$VarName).Value
+	if(($path -ne $null) -and $path.GetType().Name -ne 'String') { Write-Error "FATAL: invalid variable name '$VarName'"; Exit }  
+	if(-not (Test-Path -LiteralPath $path)) { 
+		Write-Debug "creating $VarName '$path'"	
+		New-Item -ItemType Directory -Path $path | Out-Null
+	}	
+}
 
 function CompareFiles ($fileA, $fileB, $fileBHash) {
 	if($fileA.Length -ne $fileB.Length) {
@@ -68,35 +78,42 @@ $Verbose = $false; if($PSBoundParameters['Verbose']) { $Verbose = $true }
 $Debug = $false; if($PSBoundParameters['Debug']) { $Debug = $true }
 if($Debug){ $DebugPreference = 'Continue' }
 
-$Source = Resolve-Path $SourcePath
-$Target = Resolve-Path $TargetPath
+$Source = Resolve-Path "$SourcePath\"
+$Target = Resolve-Path "$TargetPath\"
 $ignoreFile = Join-Path $Target '_ignore'
-$latestFolder = Join-Path $Target '_latest\' 
-$JournalFolder = Join-Path $Target '_journal\'
-$backupFolder = Join-Path $Target "$(Get-Date -Format 'yyyyMMdd').1"
-while (Test-Path -LiteralPath $backupFolder) {
-	if($backupFolder -match '\.(\d+)$' ) { 
-		$backupFolder = $backupFolder -replace '\.\d+$', ".$([int]$Matches[1] + 1)"
-	}
-}
-if(-not (Test-Path -LiteralPath $latestFolder)) { New-Item -ItemType Directory -Path $latestFolder | Out-Null }
-if(-not (Test-Path -LiteralPath $JournalFolder)) { New-Item -ItemType Directory -Path $JournalFolder | Out-Null }
-New-Item -ItemType Directory -Path $backupFolder | Out-Null 
-$latestFolder = Resolve-Path $latestFolder 
-$JournalFolder = Resolve-Path $JournalFolder
-$backupFolder = Resolve-Path $backupFolder
+$latestDirectory = Join-Path $Target '_latest\' 
+$latestStateFile = Join-Path $Target '_latestState' 
+$journalDirectory = Join-Path $Target '_journal\'
 
-$journal = Join-Path $JournalFolder $backupFolder.Path.Remove(0, $Target.Path.Length)
+$backupDirectory = ''
+$revision = 0
+do {
+	$revision++
+	$backupDirectory = Join-Path $Target "$(Get-Date -Format 'yyyyMMdd').$revision\"	
+} while (Test-Path -LiteralPath $backupDirectory);
+
+EnsureDirectoryExists 'latestDirectory'
+EnsureDirectoryExists 'journalDirectory'
+EnsureDirectoryExists 'backupDirectory' 
+$latestDirectory = Resolve-Path "$latestDirectory\"
+$journalDirectory = Resolve-Path "$journalDirectory\"
+$backupDirectory = Resolve-Path "$backupDirectory\"
+
+$journalFile = Join-Path $journalDirectory "$(Get-Date -Format 'yyyyMMdd').$revision"
+"$(Get-Date -Format 'yyyy-MM-dd:HH-mm-ss') backing up '$Source' to '$Target'" > $journalFile
+
+if($Error.Count -ne $priorErrorCount) {
+	Write-Error "there were errors."
+	Exit	
+}
 
 function Main () {
-	"$(Get-Date -Format 'yyyy-MM-dd:HH-mm-ss') backing up '$Source' to '$Target'"
-
  	"Checking _latest\ integrity..." # ============================================================================================
 # ====================================================================================================================
-	if([System.IO.File]::Exists((Join-Path $Target '_latestState'))) {
-		$expectedLatestHash = gc (Join-Path $Target '_latestState')
+	if([System.IO.File]::Exists($latestStateFile)) {
+		$expectedLatestHash = gc $latestStateFile
 	}
-	$actualLatestHash = Get-DirectoryHash $latestFolder -HashBehaviour ContentAndPath
+	$actualLatestHash = Get-DirectoryHash $latestDirectory -HashBehaviour ContentAndPath
 
 	if(($expectedLatestHash -ne $null) -and ($expectedLatestHash -ne $actualLatestHash)) {
 		Write-Error "_latest\ state: '$actualLatestHash', should be '$expectedLatestHash'"
@@ -122,11 +139,11 @@ function Main () {
 	Write-Verbose ($sourceFiles.Keys | Out-String)
 
 	$latestFiles = @{}
-	$files = ls -Recurse -File $latestFolder
+	$files = ls -Recurse -File $latestDirectory
 	foreach($file in $files) {
-		$latestFiles.Add($file.FullName.Remove(0, $latestFolder.Path.Length), $file)
+		$latestFiles.Add($file.FullName.Remove(0, $latestDirectory.Path.Length), $file)
 	}
-	"found $($latestFiles.Count) files in $latestFolder"
+	"found $($latestFiles.Count) files in $latestDirectory"
 	Write-Verbose ($latestFiles.Keys | Out-String)
 
 	"Checking _ignore file..." # =======================================================================================
@@ -139,13 +156,13 @@ function Main () {
 				$entry = $entry.Remove(0, 1)
 			}
 			$ignoreFiles = @((ls -Recurse -File ($Source.Path + '\' + $entry)))
-			Write-Debug "DEBUG: _ignore '$entry': $($ignoreFiles.Length) files"
+			"_ignore '$entry': $($ignoreFiles.Length) files"
 
 			foreach ($file in $ignoreFiles) {
 				$key = $file.FullName.Remove(0, $Source.Path.Length)
 				if(-not $sourceFiles.ContainsKey($key)) { Write-Error "cannot _ignore '$key': not found" }
 				else {
-					Write-Verbose "VERBOSE: _ignore '$file'"
+					Write-Debug "_ignore '$file'"
 					$sourceFiles.Remove($key)
 					$ignorecnt++;
 				}
@@ -158,7 +175,7 @@ function Main () {
 		"no _ignore file found"
 	}
 
-	$allfiles = $sourceFiles.Keys + @($targetFiles.Keys)
+	$allfiles = $sourceFiles.Keys + @($latestFiles.Keys)
 	$allfiles = $allfiles | sort | Get-Unique
 
 	"Applying changes to backup Target..." # ==========================================================================================
@@ -166,17 +183,17 @@ function Main () {
 
 	$rmcnt=0;$newcnt=0;$updcnt=0;
 	foreach($file in $allfiles) { 
-		$latestFile = (Join-Path $latestFolder $file)
+		$latestFile = (Join-Path $latestDirectory $file)
 		$oldBackupFile = $null; $oldBackupFileHash = $null
-		if($targetFiles.ContainsKey($file) -and [System.IO.File]::Exists($targetFiles[$file].FullName)) {
-			$oldBackupFile, $oldBackupFileHash, $__ = [System.IO.File]::ReadAllLines($targetFiles[$file].FullName)
+		if($latestFiles.ContainsKey($file) -and [System.IO.File]::Exists($latestFiles[$file].FullName)) {
+			$oldBackupFile, $oldBackupFileHash, $__ = [System.IO.File]::ReadAllLines($latestFiles[$file].FullName)
 			if($VerifyHash) { $oldBackupFileHash = $null }
 		}
-		Write-Debug "DEBUG: inspecting '$file' (current: '$(Join-Path $Source $file)', latest backup: '$oldBackupFile')"
+		Write-Debug "inspecting '$file' (current: '$(Join-Path $Source $file)', latest backup: '$oldBackupFile')"
 		
 		Write-Debug "source contains '$file': $($sourceFiles.ContainsKey($file))"
 		if(-not $sourceFiles.ContainsKey($file)) {
-			Write-Verbose "VERBOSE: found '$file' in the latest backup, but '$(Join-Path $Source $file)' is not present (anymore)"
+			Write-Verbose "found '$file' in the latest backup, but '$(Join-Path $Source $file)' is not present (anymore)"
 			"deleting '$latestFile'"
 			[System.IO.File]::Delete($latestFile)
 
@@ -184,12 +201,12 @@ function Main () {
 		}
 
 		# TODO: look for moved files
-		Write-Debug "target contains '$file': $($targetFiles.ContainsKey($file))"
-		if(-not $targetFiles.ContainsKey($file)) {
-			Write-Verbose "VERBOSE: found '$(Join-Path $Source $file)', but no matching '$file' in the latest backup"
+		Write-Debug "target contains '$file': $($latestFiles.ContainsKey($file))"
+		if(-not $latestFiles.ContainsKey($file)) {
+			Write-Verbose "found '$(Join-Path $Source $file)', but no matching '$file' in the latest backup"
 			"backing up $file"
 
-			WriteBackupFile $sourceFiles[$file] (Join-Path $backupFolder $file) (Join-Path $latestFolder $file)
+			WriteBackupFile $sourceFiles[$file] (Join-Path $backupDirectory $file) (Join-Path $latestDirectory $file)
 
 			$newcnt++; continue;
 		}
@@ -197,25 +214,25 @@ function Main () {
 		if(-not [System.IO.File]::Exists($oldBackupFile)) { Write-Error "backup file missing: '$oldBackupFile'"; Exit; }
 		
 		if(-not (CompareFiles $sourceFiles[$file] (ls -LiteralPath $oldBackupFile) $oldBackupFileHash)) {
-			Write-Verbose "VERBOSE: '$(Join-Path $Source $file)' has been modified since the latest backup"
+			Write-Verbose "'$(Join-Path $Source $file)' has been modified since the latest backup"
 			"updating $file"
 
-			WriteBackupFile $sourceFiles[$file] (Join-Path $backupFolder $file) (Join-Path $latestFolder $file)
+			WriteBackupFile $sourceFiles[$file] (Join-Path $backupDirectory $file) (Join-Path $latestDirectory $file)
 			$updcnt++;
 		}
 		else {
-			Write-Verbose "VERBOSE: '$(Join-Path $Source $file)' is already backed up (not modified)"
+			Write-Verbose "'$(Join-Path $Source $file)' is already backed up (not modified)"
 		}
 	}
 
 	"Finishing up..." # ==========================================================================================================
 
-	$actualLatestHash = Get-DirectoryHash $latestFolder -HashBehaviour ContentAndPath
-	$actualLatestHash > (Join-Path $Target '_latestState')
+	$actualLatestHash = Get-DirectoryHash $latestDirectory -HashBehaviour ContentAndPath
+	$actualLatestHash > $latestStateFile
 
 	"removed $rmcnt files, added $newcnt files, updated $updcnt files since last backup"
 	"$($Error.Count) error(s)"
 	"updated _latestState: '$actualLatestHash'"
 	"Done"
 }
-Main *>&1 | %{ $_; $_ >> $journal }
+Main *>&1 | %{ $_; $_ >> $journalFile } 
