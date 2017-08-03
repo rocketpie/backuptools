@@ -215,7 +215,7 @@ function Main () {
 			$newcnt++; continue;
 		}
 			
-		if(-not [System.IO.File]::Exists($oldBackupFile)) { Write-Error "backup file missing: '$oldBackupFile'"; Exit; }
+		if(-not [System.IO.File]::Exists($oldBackupFile)) { Write-Error "backup file missing: '$oldBackupFile'"; }
 		
 		if(-not (CompareFiles $sourceFiles[$file] (ls -LiteralPath $oldBackupFile) $oldBackupFileHash)) {
 			Write-Verbose "'$(Join-Path $Source $file)' has been modified since the latest backup"
