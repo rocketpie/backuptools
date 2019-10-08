@@ -92,10 +92,10 @@ DebugVar 'runDirPath'
 mkdir $runDirPath | Out-Null
 if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot create run directory '$runDirPath'"; exit }
 
-$journalFile = (Join-Path $runDirPath '_journal.txt')
-DebugVar 'journalFile'
-"Backing up '$SourcePath'" >> $journalFile
-if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot write to journal file"; exit }
+$logFile = (Join-Path $runDirPath 'log.txt')
+DebugVar 'logFile'
+"Backing up '$SourcePath'" >> $logFile
+if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot write to log file"; exit }
 
 
 
@@ -156,5 +156,5 @@ if($Test) {
     exit
 }
 else {
-    Main $SourcePath $TargetPath $latestDirPath $runDirName 2>&1 | %{ $_ >> $journalFile; $_ }
+    Main $SourcePath $TargetPath $latestDirPath $runDirName 2>&1 | %{ $_ >> $logFile; $_ }
 }
