@@ -23,19 +23,8 @@ function RunBackup {
     backup.ps1 .\source .\backups | Out-Null
 }
 
-# expects 'True' or $true to be returned on success, else is failed
-function Test($name, $testScript) {
-    $result = &$testScript
-    if ($result.ToString() -eq 'True') {
-        "PASSED: $name"
-    }
-    else {
-        Write-Error "FAILED: $name"
-    }
-}
-
 # interprets objects returned from tests as errors
-function TestV2($name, $testScript) {
+function Test($name, $testScript) {
     $result = @(&$testScript)
 
     if ($result.Length -gt 0) {
@@ -89,84 +78,50 @@ function EditRandomFile {
     }
 }
 
-function Diff($sourceDir, $targetDir) {
-    $sourceDir = get-item $sourceDir
-    $targetDir = get-item $targetDir
-
-    $result = New-Object psobject -Property @{
-        'Total' = 0; 
-        'Enter' = @(); 
-        'Exit'  = @()
-    };
-
-    # get sorted lists of both directories
-    # remove common root path (including '\' that was not part of the dir.FullName) to get comparable relative names. 
-    # They come sorted from ls, but for good measure, ensure alphabetic sorting.
-    $sourceFiles = @(ls -Recurse $sourceDir) | % { $_.FullName.Substring($sourceDir.FullName.Length + 1) } | sort
-    $targetFiles = @(ls -Recurse $targetDir) | % { $_.FullName.Substring($targetDir.FullName.Length + 1) } | sort
-    
-    # step through both sorted lists in sync, sorting mismatches on the go
-    $sIdx = 0;
-    $tIdx = 0;
-    $hasNext = ($sourceFiles.Length -gt 0) -and ($targetFiles.Length -gt 0)   
-    while ($hasNext) {
-        $compares = $sourceFiles[$sIdx].CompareTo($targetFiles[$tIdx])
-
-        if ($compare -eq 0) {
-            $sIdx++;
-            $tIdx++;
-        }
-        elseif ($compare -gt 0) {
-            # 1 == 'b'.CompareTo('a') => source is ahead of target, indicating a file in target that's missing in source
-            $result.Exit += @($targetFiles[$tIdx])
-            $tIdx++;
-        }
-        elseif ($compare -lt 0) {
-            # -1 == 'a'.CompareTo('b') => source is behind on target, indicating an extra file in source
-            $result.Enter += @($sourceFiles[$sIdx])
-            $sIdx++;
-        }
-        
-        $hasNext = ($sourceFiles.Length -gt $sIdx) -and ($targetFiles.Length -gt $tIdx)
-    }
-
-    # flush remainder
-    $remainingSourceFiles = $sourceFiles[$sIdx..$sourceFiles.Length]
-    if ($remainingSourceFiles) {
-        $result.Enter += @($remainingSourceFiles)
-    }
-    
-    $remainingTargetFiles = $targetFiles[$tIdx..$targetFiles.Length]
-    if ($remainingTargetFiles) {
-        $result.Exit += @($remainingTargetFiles)
-    }
-
-    $result
-}
-
 # Tests ============================================================================================================
 # ==================================================================================================================
 
+Test 'EXPECT FAILURE' {
+    'this self test must show up as failed'
+}
+
 ResetSandbox
 
-TestV2 'run without backup dir existing should create backup dir, copy of source, and journal' {
+Test 'run without backup dir existing should create backup dir, copy of source, and log' {
     RunBackup
 
     if (-not (Test-Path .\backups)) { 'target dir missing' }
     if (-not (Test-Path .\backups\_latest)) { '_latest dir missing' }
+    if (@(ls .\backups -Recurse -File 'log.txt').Length -ne 1) { 'log file missing' }
+    $diff = .\Compare-Directories.ps1 .\source .\backups\_latest
+    if($diff.Total -gt 0) { '_latest is not a copy of source' }
 }
 
 Test 'add file: should find backup in _latest' {
-    RunBackup
-    $file = AddRandomFile
+    $filePath = AddRandomFile
     RunBackup
 
-    @(ls .\backups\_latest -Recurse -File (split-path -leaf $file)).Length -eq 1
+    $backedUpFile = (ls .\backups\_latest -Recurse -File (split-path -leaf $filePath))
+    if(-not $backedUpFile) { 'nope' }
 }
 
 Test 'edit file: should find both versions in backup' {
-    $false
+    'not implemented'
 }
+
+Test 'directory is not to be confused with file' {
+    'content' > .\source\5
+    RunBackup
+
+    rm .\source\5
+    mkdir .\source\5 | Out-Null
+    RunBackup
+
+    $diff = .\Compare-Directories.ps1 .\source .\backups\_latest
+    if($diff.Total -ne 2) { "$($diff.Total) => this is why backup.ps1 should do a more elaborate diff than this simple test diff function" }
+}
+
+exit
 
 $leftover = DeleteRandomFile
 while ($leftover) {
