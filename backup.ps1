@@ -16,10 +16,7 @@ Param(
 
 	[Parameter(Mandatory = $true, Position = 1)]
 	[string]
-    $TargetPath, 
-    
-    [Parameter(Mandatory = $false)]
-    [switch]$Test = $false
+    $TargetPath
 )
     
 # Functions ========================================================================================================
@@ -41,28 +38,14 @@ function DebugOutput($name, $value) {
     Write-Debug "$($name.PadRight(15)): $(Print $value)"    
 }
 
-# returns an object with a method 'GetRelativePath($target)' that returns a relative path from $rootPath to $target
-function NewRelativePathGenerator($rootPath) {
-    $rootPath = (Resolve-Path $rootPath).Path # make sure root path is absolute
-    $rootPath = $rootPath.TrimEnd('/').TrimEnd('\') + '/' # make sure root path is uniform, ending with '/'
-    # TODO: Test what happens if so passes a filename as root uri?
-    $rootUri = [uri]::new($rootPath)
-
-    $generator = New-Object psobject
-    $generator | Add-Member -MemberType NoteProperty -Name 'RootUri' -Value $rootUri
-    $generator | Add-Member -MemberType ScriptMethod -Name 'GetRelativePath' -Value { 
-        Param($target) 
-        $this.RootUri.MakeRelative([uri]::new($target)) 
-    }
-
-    $generator
-}
-
 # Preparation ======================================================================================================
 # ==================================================================================================================
 
 $priorErrorCount = $Error.Count
 Write-Debug $MyInvocation.Line
+
+$scriptPath = Split-path $MyInvocation.MyCommand.Definition
+DebugVar 'scriptPath'
 
 $SourcePath = Resolve-Path $SourcePath
 DebugVar 'SourcePath'
@@ -82,79 +65,48 @@ if(-not (Test-Path $latestDirPath)) {
     if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot create _latest directory '$latestDirPath'"; exit }
 }
 
-$runDirName = "$(Get-Date -f 'yyyy-MM-dd')"
+$logDirName = "$(Get-Date -f 'yyyy-MM-dd')"
 $revision = 0
 do {
 	$revision++
-	$runDirPath = Join-Path $TargetPath "$runDirName.$revision"	
-} while (Test-Path -LiteralPath $runDirPath);
-DebugVar 'runDirPath'
-mkdir $runDirPath | Out-Null
-if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot create run directory '$runDirPath'"; exit }
+	$logDirPath = Join-Path $TargetPath "$logDirName.$revision"	
+} while (Test-Path -LiteralPath $logDirPath);
+DebugVar 'logDirPath'
+mkdir $logDirPath | Out-Null
+if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot create log directory '$logDirPath'"; exit }
 
-$logFile = (Join-Path $runDirPath 'log.txt')
+$logFile = (Join-Path $logDirPath 'log.txt')
 DebugVar 'logFile'
 "Backing up '$SourcePath'" >> $logFile
-if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot write to log file"; exit }
+if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot write log file"; exit }
 
 
-
-function Main($SourcePath, $TargetPath, $latestDirPath, $runDirName) {    
+function Main($SourcePath, $latestDirPath, $logDirPath, $scriptPath) {    
 
     # Step 1: Determine changes ====================================================================================
-    # ==============================================================================================================
-    
-    $sourceFiles = @(ls $SourcePath -Recurse)
-    DebugOutput 'sourcefiles' $sourceFiles.Length
-    
-    $relativeSourcePath = NewRelativePathGenerator $SourcePath
-    $sourcefiles | %{ 
-        $relativePath = $relativeSourcePath.GetRelativePath($_.FullName);
-        $targetPath = Join-Path $latestDirPath $relativePath
-        "backup $relativePath"
-        cp $_.FullName $targetPath
+    # ==============================================================================================================    
+    $changes = &$scriptPath\Compare-Directories.ps1
+    "$($changes.Enter) new files, $($changes.Update) files changed, $($changes.Exit) files deleted"
+    Read-Host 'Sounds right?'
+
+    # step 2: Move all deleted files
+    $changes.Exit | % { 
+        Write-Debug "deleted: $_"
+        mv (Join-Path $latestDirPath $_) (Join-Path $logDirPath\deleted $_) 
+    }
+
+    # step 3: Move all updated files, back up new version
+    $changes.Update | % { 
+        Write-Debug "updated: $_"
+        mv (Join-Path $latestDirPath $_) (Join-Path $logDirPath\updated $_) 
+        cp (Join-Path $SourcePath $_) (Join-Path $latestDirPath)
+    }
+
+    # step 4: back up new files
+    $changes.Enter | % {
+        Write-Debug "new file: $_"
+        cp (Join-Path $SourcePath $_) (Join-Path $latestDirPath)
     }
 }
 
-
-
-# Self-Tests =======================================================================================================
-# ==================================================================================================================
-
-function TestGetRelativePath() {
-    $testDirName = [guid]::NewGuid().ToString()
-    mkdir $testDirName | Out-Null
-    mkdir (Join-Path $testDirName 'subdir') | Out-Null
-
-    $testDirObj = NewRelativePathGenerator $testDirName
-    
-    $testFileA = (Join-Path $testDirName 'testfile.txt')
-    $testFileB = (Join-Path $testDirName 'subdir/testfile.txt')
-    'test' > $testFileA
-    'test' > $testFileB
-
-    $result = $testDirObj.GetRelativePath((Resolve-Path $testFileA))
-    if($result -ne 'testfile.txt') {
-        Write-Error "A: $result"
-    }
-
-    $result = $testDirObj.GetRelativePath((Resolve-Path $testFileB))
-    if($result -ne 'subdir/testfile.txt') {
-        Write-Error "B: $result"
-    }
-
-    $result = (Join-Path $testDirName $result)
-    if($result -ne "$testdirname\subdir\testfile.txt") {
-        Write-Error "C: $result"
-    }
-
-    rm $testDirName -Recurse -Force
-}
-
-if($Test) {
-    TestGetRelativePath
-    exit
-}
-else {
-    Main $SourcePath $TargetPath $latestDirPath $runDirName 2>&1 | %{ $_ >> $logFile; $_ }
-}
+Main $SourcePath $latestDirPath $logDirPath $scriptPath 2>&1 | %{ $_ >> $logFile; $_ }
