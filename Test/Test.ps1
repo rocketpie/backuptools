@@ -116,35 +116,49 @@ Test 'add file: should find backup in _latest' {
     if(-not $backedUpFile) { 'nope' }
 }
 
+Test 'dont change a thing, expect 0 in log file' {
+    RunBackup
+
+    if((ls .\backups\*\log.txt | Select-String '0 new files, 0 files changed, 0 files deleted').Length -ne 2) { # first Test report, and this one
+        'found something else'
+    }
+}
+
+Test 'add a bunch of files : should report file count in log file' {
+    for ($i = 0; $i -lt 20; $i++) {
+        AddRandomFile | Out-Null
+    }
+
+    RunBackup
+
+    if(-not (ls .\backups\*\log.txt | Select-String '20 new files')) {
+        'nope'
+    }
+}
+
 Test 'edit file: should find both versions in backup' {
     $testFile = RandomSourceFile
 
-    $oldContent = gc $testFile.Fullname -Raw
+    $oldContent = gc $testFile.Fullname
     $newContent = RandomString
 
     $newContent > $testFile.Fullname
     
     RunBackup
 
-    if($newContent -ne (ls .\backups\_latest -Recurse -File | ?{$_.name -eq $testFile.name} | gc -Raw)) {
-        'updated content not found in _latest'
+    $testContent = (ls .\backups\_latest -Recurse -File | ?{$_.name -eq $testFile.name} | gc )
+    if($newContent -ne $testContent) {
+        "updated content not found in _latest (expected '$newContent', found '$testContent')"
     }
 
-    if($oldContent -ne (ls .\backups -Recurse -File | ?{($_.name -eq $testFile.name) -and ($_.FullName -notmatch '\\_latest\\') } | gc -Raw )) {
-        'prior content not found in log file'
+    $testContent = (ls .\backups -Recurse -File | ?{($_.name -eq $testFile.name) -and ($_.FullName -notmatch '\\_latest\\') } | gc )
+    if($oldContent -ne $testContent) {
+        "prior content not found in log file (expected '$oldContent', found '$testContent')"
     }
 }
 
-Test 'directory is not to be confused with file' {
-    'content' > .\source\5
-    RunBackup
-
-    rm .\source\5
-    mkdir .\source\5 | Out-Null
-    RunBackup
-
-    $diff = GetDiff
-    if($diff.Total -ne 2) { "$($diff.Total) => this is why backup.ps1 should do a more elaborate diff than this simple test diff function" }
+Test 'copy empty directory' {
+    'NotImplemented'
 }
 
 $leftover = DeleteRandomFile
