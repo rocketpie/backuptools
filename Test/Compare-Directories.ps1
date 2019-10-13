@@ -25,6 +25,7 @@
 
         right?
         What if the directory is only empty on one side?
+        I'll leave dirs for now and stick with files only.
 
 
     .EXAMPLE
@@ -91,13 +92,13 @@ function DiffList([string[]]$sourceList, [string[]]$targetList, $ItemsDiffer) {
 
     # flush remainder
     $remainingSourceFiles = $sourceFiles[$sIdx..$sourceFiles.Length]
-    if ($remainingSourceFiles) {
-        $result.Enter.AddRange(@($remainingSourceFiles))
+    foreach ($item in $remainingSourceFiles) {
+        $result.Enter.Add($item)
     }
         
     $remainingTargetFiles = $targetFiles[$tIdx..$targetFiles.Length]
-    if ($remainingTargetFiles) {
-        $result.Exit.AddRange(@($remainingTargetFiles))
+    foreach ($item in $remainingTargetFiles) {
+        $result.Exit.Add($item)
     }
 
     $result.Total = $result.Enter.Count + $result.Update.Count + $result.Exit.Count
@@ -112,30 +113,24 @@ $targetDir = get-item $targetPath
 
 if ($Error.Count -ne $ecnt) { exit } # can't find directories or somethin
 
-# get sorted lists of both directories
+# get sorted file lists of both directories
 # remove common root path (including '\' that was not part of the dir.FullName) to get comparable relative names. 
-#$sourceDirs = @(ls -Recurse -Directory $SourceDir | %{ $_.FullName.Substring($SourceDir.FullName.Length + 1) })
-#$targetDirs = @(ls -Recurse -Directory $SourceDir | %{ $_.FullName.Substring($SourceDir.FullName.Length + 1) })
-
-#$dirDiff = DiffList $sourceDirs $targetDirs { $false } # directories don't change once they exist
-
 $sourceFiles = @(ls -Recurse -File $SourceDir | %{ $_.FullName.Substring($SourceDir.FullName.Length + 1) })
 $targetFiles = @(ls -Recurse -File $targetDir | %{ $_.FullName.Substring($targetDir.FullName.Length + 1) })
 
 $fileDiff = DiffList $sourceFiles $targetFiles { 
-    Param($filename)
-    $sourceLength = Get-ItemPropertyValue (Join-Path $SourcePath $filename) -Name Length
-    $targetLength = Get-ItemPropertyValue (Join-Path $TargetPath $filename) -Name Length
+    Param($filename)    
+    # matching files: include in Update selection or not? 
 
-    if($sourceLength -ne $targetLength) {
+    $sourceFile = Get-Item (Join-Path $SourcePath $filename)
+    $targetFile = Get-Item (Join-Path $TargetPath $filename)
+
+    if($sourceFile.Length -ne $targetFile.Length) {
         Write-Debug "different Length"
         return $true;
     }
 
-    $sourceDate = Get-ItemPropertyValue (Join-Path $SourcePath $filename) -Name LastWriteTime
-    $targetDate = Get-ItemPropertyValue (Join-Path $TargetPath $filename) -Name LastWriteTime
-
-    if($sourceDate -ne $targetDate) {
+    if($sourceFile.LastWriteTime -ne $targetFile.LastWriteTime) {
         Write-Debug "different LastWriteTime"
         return $true;
     }
