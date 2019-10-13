@@ -72,7 +72,7 @@ function DiffList([string[]]$sourceList, [string[]]$targetList, $ItemsDiffer) {
         if ($compare -eq 0) {
             $sIdx++;
             $tIdx++;
-            if([bool](&$ItemsDiffer $sourceItem)) {
+            if ([bool](&$ItemsDiffer $sourceItem)) {
                 $result.Update.Add($sourceItem)
             }
         }
@@ -115,8 +115,8 @@ if ($Error.Count -ne $ecnt) { exit } # can't find directories or somethin
 
 # get sorted file lists of both directories
 # remove common root path (including '\' that was not part of the dir.FullName) to get comparable relative names. 
-$sourceFiles = @(ls -Recurse -File $SourceDir | %{ $_.FullName.Substring($SourceDir.FullName.Length + 1) })
-$targetFiles = @(ls -Recurse -File $targetDir | %{ $_.FullName.Substring($targetDir.FullName.Length + 1) })
+$sourceFiles = @(ls -Recurse -File $SourceDir | % { $_.FullName.Substring($SourceDir.FullName.Length + 1) })
+$targetFiles = @(ls -Recurse -File $targetDir | % { $_.FullName.Substring($targetDir.FullName.Length + 1) })
 
 $fileDiff = DiffList $sourceFiles $targetFiles { 
     Param($filename)    
@@ -125,18 +125,18 @@ $fileDiff = DiffList $sourceFiles $targetFiles {
     $sourceFile = Get-Item (Join-Path $SourcePath $filename)
     $targetFile = Get-Item (Join-Path $TargetPath $filename)
 
-    if($sourceFile.Length -ne $targetFile.Length) {
+    if ($sourceFile.Length -ne $targetFile.Length) {
         Write-Debug "different Length"
         return $true;
     }
 
-    if($sourceFile.LastWriteTime -ne $targetFile.LastWriteTime) {
+    if ($sourceFile.LastWriteTime -ne $targetFile.LastWriteTime) {
         Write-Debug "different LastWriteTime"
         return $true;
     }
-
+                
     Write-Debug "not modified: $filename"
     return $false;
 }
-
+            
 $fileDiff
