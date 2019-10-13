@@ -96,7 +96,7 @@ function Main($SourcePath, $latestDirPath, $logDirPath, $scriptPath) {
     # Step 1: Determine changes ====================================================================================
     # ==============================================================================================================    
     $changes = &$scriptPath\Compare-Directories.ps1 $SourcePath $latestDirPath
-    "$($changes.Enter) new files, $($changes.Update) files changed, $($changes.Exit) files deleted"
+    "$($changes.Enter.Count) new files, $($changes.Update.Count) files changed, $($changes.Exit.Count) files deleted"
     if (-not $Confirm) {
         if ('y' -ne (Read-Host 'Sounds right? (y)').ToLower()) {
             $changes
@@ -106,7 +106,7 @@ function Main($SourcePath, $latestDirPath, $logDirPath, $scriptPath) {
 
     # step 2: Move all deleted files
     $changes.Exit | % { 
-        Write-Debug "deleted: $_"
+        "deleted: $_"
         
         EnsureDirectory (Join-Path $deletedDirPath $_)
         mv (Join-Path $latestDirPath $_) (Join-Path $deletedDirPath $_) 
@@ -114,7 +114,7 @@ function Main($SourcePath, $latestDirPath, $logDirPath, $scriptPath) {
 
     # step 3: Move all updated files, back up new version
     $changes.Update | % { 
-        Write-Debug "updated: $_"
+        "updated: $_"
         
         EnsureDirectory (Join-Path $updatedDirPath $_)
         mv (Join-Path $latestDirPath $_) (Join-Path $updatedDirPath $_) 
@@ -125,7 +125,7 @@ function Main($SourcePath, $latestDirPath, $logDirPath, $scriptPath) {
 
     # step 4: back up new files
     $changes.Enter | % {
-        Write-Debug "new file: $_"
+        "new file: $_"
 
         EnsureDirectory (Join-Path $latestDirPath $_)
         cp (Join-Path $SourcePath $_) (Join-Path $latestDirPath $_)

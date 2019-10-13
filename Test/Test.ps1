@@ -109,7 +109,7 @@ Test 'run without backup dir existing should create backup dir, copy of source, 
 Test 'add file: should find backup in _latest' {
     $filePath = AddRandomFile
     Write-Debug $filePath
-    
+
     RunBackup
 
     $backedUpFile = ls .\backups\_latest -Recurse -File | ?{$_.Name -eq (split-path -leaf $filePath) }
@@ -130,7 +130,7 @@ Test 'edit file: should find both versions in backup' {
         'updated content not found in _latest'
     }
 
-    if($oldContent -ne (ls .\backups -Recurse -File | ?{($_.name -eq $testFile.name) -and ($_.FullName -notmatch '\_latest\') } | gc -Raw )) {
+    if($oldContent -ne (ls .\backups -Recurse -File | ?{($_.name -eq $testFile.name) -and ($_.FullName -notmatch '\\_latest\\') } | gc -Raw )) {
         'prior content not found in log file'
     }
 }
