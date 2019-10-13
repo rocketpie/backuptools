@@ -1,6 +1,10 @@
+
+$global:testScriptPath = Split-path $MyInvocation.MyCommand.Definition
+$global:backupScriptPath = Split-Path (Get-Command backup.ps1).Definition
+
 # make sure we're in the test directory
 $prevWorkingPath = Get-Location
-cd (Split-path $MyInvocation.MyCommand.Definition)
+cd $global:testScriptPath
 
 # Functions ========================================================================================================
 # ==================================================================================================================
@@ -20,7 +24,12 @@ function ResetSandbox {
 
 # silently executes backup .\source .\backups
 function RunBackup {
-    backup.ps1 .\source .\backups | Out-Null
+    backup.ps1 .\source .\backups -Confirm | Out-Null
+}
+
+# return 
+function GetDiff {
+    & $global:backupScriptPath\Compare-Directories.ps1 .\source .\backups\_latest
 }
 
 # interprets objects returned from tests as errors
@@ -41,7 +50,7 @@ function RandomString {
     [guid]::NewGuid().ToString()
 }
 
-function RandomNewFileName {
+function RandomNewFilePath {
     $filename = RandomString
     
     $dirs = ls .\source -Recurse -Directory
@@ -50,31 +59,31 @@ function RandomNewFileName {
     join-path $dirs[$rand.Next($dirs.Length)].Fullname $filename
 }
 
-function RandomSourceFileName {
+function RandomSourceFile {
     $allfiles = @(ls .\source -Recurse -File)    
     if ($allfiles) {
-        $allfiles[$rand.Next($allfiles.Length)].Fullname 
+        $allfiles[$rand.Next($allfiles.Length)]
     }
 }
 
 function AddRandomFile {
-    $filename = RandomNewFileName
+    $filename = RandomNewFilePath
     RandomString > $filename
     $filename
 }
 
 function DeleteRandomFile {
-    $filename = RandomSourceFileName
+    $file = RandomSourceFile
     if ($file) {
-        rm $filename
-        $filename
+        rm $file.Fullname
+        $file.Name
     }
 }
 
 function EditRandomFile {
-    $filename = RandomSourceFileName 
-    if ($filename) { 
-        RandomString > $filename
+    $file = RandomSourceFile
+    if ($file) { 
+        RandomString > $file.Fullname
     }
 }
 
@@ -93,20 +102,37 @@ Test 'run without backup dir existing should create backup dir, copy of source, 
     if (-not (Test-Path .\backups)) { 'target dir missing' }
     if (-not (Test-Path .\backups\_latest)) { '_latest dir missing' }
     if (@(ls .\backups -Recurse -File 'log.txt').Length -ne 1) { 'log file missing' }
-    $diff = .\Compare-Directories.ps1 .\source .\backups\_latest
+    $diff = GetDiff
     if($diff.Total -gt 0) { '_latest is not a copy of source' }
 }
 
 Test 'add file: should find backup in _latest' {
     $filePath = AddRandomFile
+    Write-Debug $filePath
+    
     RunBackup
 
-    $backedUpFile = (ls .\backups\_latest -Recurse -File (split-path -leaf $filePath))
+    $backedUpFile = ls .\backups\_latest -Recurse -File | ?{$_.Name -eq (split-path -leaf $filePath) }
     if(-not $backedUpFile) { 'nope' }
 }
 
 Test 'edit file: should find both versions in backup' {
-    'not implemented'
+    $testFile = RandomSourceFile
+
+    $oldContent = gc $testFile.Fullname -Raw
+    $newContent = RandomString
+
+    $newContent > $testFile.Fullname
+    
+    RunBackup
+
+    if($newContent -ne (ls .\backups\_latest -Recurse -File | ?{$_.name -eq $testFile.name} | gc -Raw)) {
+        'updated content not found in _latest'
+    }
+
+    if($oldContent -ne (ls .\backups -Recurse -File | ?{($_.name -eq $testFile.name) -and ($_.FullName -notmatch '\_latest\') } | gc -Raw )) {
+        'prior content not found in log file'
+    }
 }
 
 Test 'directory is not to be confused with file' {
@@ -117,11 +143,9 @@ Test 'directory is not to be confused with file' {
     mkdir .\source\5 | Out-Null
     RunBackup
 
-    $diff = .\Compare-Directories.ps1 .\source .\backups\_latest
+    $diff = GetDiff
     if($diff.Total -ne 2) { "$($diff.Total) => this is why backup.ps1 should do a more elaborate diff than this simple test diff function" }
 }
-
-exit
 
 $leftover = DeleteRandomFile
 while ($leftover) {
