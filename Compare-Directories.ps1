@@ -113,10 +113,10 @@ $targetDir = get-item $targetPath
 
 if ($Error.Count -ne $ecnt) { exit } # can't find directories or somethin
 
-# get sorted file lists of both directories
+# get sorted file lists of both directories. ls seems to produce sorted output, but only within, not across directories with -Recurse
 # remove common root path (including '\' that was not part of the dir.FullName) to get comparable relative names. 
-$sourceFiles = @(ls -Recurse -File $SourceDir | % { $_.FullName.Substring($SourceDir.FullName.Length + 1) })
-$targetFiles = @(ls -Recurse -File $targetDir | % { $_.FullName.Substring($targetDir.FullName.Length + 1) })
+$sourceFiles = @(ls -Recurse -File $SourceDir | % { $_.FullName.Substring($SourceDir.FullName.Length + 1) } | sort )
+$targetFiles = @(ls -Recurse -File $targetDir | % { $_.FullName.Substring($targetDir.FullName.Length + 1) } | sort)
 
 $fileDiff = DiffList $sourceFiles $targetFiles { 
     Param($filename)    
