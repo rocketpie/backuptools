@@ -45,7 +45,7 @@ function ResetSandbox {
     mkdir .\source\1\f | Out-Null
     mkdir .\source\2 | Out-Null
 
-    rm .\backups -Recurse -Force
+    rm .\backups -Recurse -Force -ErrorAction 'SilentlyContinue' | Out-Null 
 }
 
 # silently executes backup .\source .\backups
@@ -91,9 +91,7 @@ function RandomNewFilePath {
 
 function RandomSourceFile {
     $allfiles = @(ls .\source -Recurse -File)    
-    if ($allfiles) {
-        $hm = $global:Context.Random.Next($allfiles.Length)
-        Write-Debug "HMMMM $hm $($allfiles.Length)" -Debug
+    if ($allfiles) {        
         $allfiles[$global:Context.Random.Next($allfiles.Length)]
     }
 }
@@ -160,21 +158,26 @@ Test 'dont change a thing, expect 0 in log file' {
     RunBackup
 
     if (@(ReadLogFile | Select-String '0 new files, 0 files changed, 0 files deleted').Length -ne 1) {
-        # first Test report, and this one
         'found something else'
     }
 }
 
 # ==================================================================================================================
 Test 'add a bunch of files : should report files and count in log file' {
-    $addedFiles = @(1..20 | AddRandomFile)
-    
+    $addedFiles = @(1..20 | %{ AddRandomFile })
+
+    if($addedFiles.Length -ne 20) {
+        'SELF-TEST FAILED: didnt add enough files'
+    }
+
     RunBackup
 
     $log = ReadLogFile
-
     if (($log | Select-String 'Selftest: can i search the log this way?')) {
-        'SELF-TEST FAILED: Cannot search the log with if($log | Select-String ...'
+        'SELF-TEST FAILED: false-positive searching the log with if($log | Select-String ...'
+    }
+    if (($log | Select-String "backing up $")) {
+        'SELF-TEST FAILED: false-negative searching the log with if($log | Select-String ...'
     }
 
     if (-not ($log | Select-String '20 new files')) {
@@ -190,13 +193,12 @@ Test 'add a bunch of files : should report files and count in log file' {
 
 # ==================================================================================================================
 Test 'change a bunch of files : should report file count in log file' {    
-    $fileCount = @(1..10 | EditRandomFile | sort -Unique).Length
+    $fileCount = @(1..10 | EditRandomFile | sort -Unique).Length # it might happen that the same file is edited a few times
     
     RunBackup
 
     $log = ReadLogFile
     if(-not ($log | Select-String "$fileCount files changed")) {
-    #if (-not (ls .\backups\*\log.txt | Select-String "$fileCount files changed")) {
         'nope'
     }
 }
@@ -211,16 +213,17 @@ Test 'delete a bunch of files : should report file count in log file' {
 
     $log = ReadLogFile
     if(-not ($log | Select-String '10 files deleted')) {
-    #if (-not (ls .\backups\*\log.txt | Select-String '10 files deleted')) {
         'nope'
     }
 }
 
 # ==================================================================================================================
 Test 'edit file: should find both versions in backup' {
+    AddRandomFile | Out-Null
+    RunBackup
+    
     $testFile = RandomSourceFile
 
-    Write-Debug "WOOOOT $testFile" -Debug
     $oldContent = gc $testFile.FullName
     $newContent = RandomString
 
@@ -239,8 +242,6 @@ Test 'edit file: should find both versions in backup' {
     }
 }
 
-cd $prevWorkingPath; exit;
-
 # ==================================================================================================================
 Test 'copy empty directory' {
     ResetSandbox
@@ -253,6 +254,59 @@ Test 'copy empty directory' {
     }
 }
 
+
+Test 'hidden files are backed up' {
+    $hiddenFile = RandomNewFilePath
+
+    RandomString > $hiddenFile
+    Set-ItemProperty $hiddenFile -Name Hidden -Value $true
+
+    RunBackup
+
+    $log = ReadLogFile
+    if(-not ($log | Select-String '1 new file')) {
+        'no new files in log'
+    }
+
+    $filename = Split-Path $hiddenFile
+    if(@(ls -r backups\_latest -File | ?{ $_.name -eq $filename }).Length -ne 1) {
+        'file not found in _latest'
+    }
+}
+
+Test 'write-protected attribute is backed up' {
+    $protectedFile = AddRandomFile
+
+    $protectedFile | Set-ItemProperty -Name ReadOnly -Value $true 
+
+    RunBackup
+
+    $file = @(ls -r backups\_latest | ?{ $_.Name -eq $protectedFile.Name })[0]
+    if(-not $file) {
+        'backup file not found'
+    }
+
+    $targetProtected = @(ls -r backups\_latest | ?{ $_.Name -eq $protectedFile.Name })[0] | Get-ItemPropertyValue -Name ReadOnly
+    if(-not $targetProtected) {
+        'backup file is not write-protected'
+    }
+}
+
+Test 'backupignore single file' {
+    ResetSandbox
+
+    '1' > '.\source\.backupignore'
+    
+    'not implemented'
+}
+
+Test 'backupignore directory' {
+    'not implemented'
+}
+
+Test 'backupignore pattern' {
+    'not implemented'
+}
 
 # restore working path
 cd $prevWorkingPath
