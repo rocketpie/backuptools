@@ -13,8 +13,9 @@ General notes
 #>
 [CmdletBinding()]
 param (
-    # debugging: execute specifict test by 
-    [Parameter(Mandatory = $false)]
+    # debugging: execute specifict test by providing its (unique) prefix
+    # be careful: some tests require other tests to be run prior or fail otherwise
+    [Parameter(Position = 0, Mandatory = $false)]
     [string]
     $SpecificTest = ""
 )
@@ -87,8 +88,8 @@ function GetDiff {
 
 # interprets objects returned from tests as errors
 function Test($name, $testScript) {
-    if($Global:specificTest){
-        if(-not ($name.startswith($Global:specificTest))){
+    if ($Global:specificTest) {
+        if (-not ($name.startswith($Global:specificTest))) {
             Write-Debug "Skipping $name"
             return
         }
@@ -225,7 +226,7 @@ Test '55c6 add a bunch of files : should report files and count in log file' {
 # ==================================================================================================================
 Test '3d26 change a bunch of files : should report files and count in log file' {    
     $editedFileNames = @( 1..10 | EditRandomFile )    
-    $fileCount = @($editedFiles | sort -Unique).Length # it might happen that the same file is edited a few times
+    $fileCount = @($editedFileNames | sort -Unique).Length # it might happen that the same file is edited a few times
     
     RunBackup
 
@@ -243,7 +244,7 @@ Test '3d26 change a bunch of files : should report files and count in log file' 
 
 # ==================================================================================================================
 Test '38ac delete a bunch of files : should report file count in log file' {
-    $deletedFileNames = $(1..10 | DeleteRandomFile)
+    $deletedFileNames = @(1..10 | % { DeleteRandomFile })
     
     RunBackup
 
@@ -312,18 +313,17 @@ Test 'c5ee hidden files are backed up' {
         'no new files in log'
     }
 
+    $filename = Split-Path -Leaf $hiddenFile
     if (@(ls backups\_latest -Recurse -File -Force | ? { $_.name -eq $filename }).Length -ne 1) {
         'file not found in _latest'
     }
 }
 
-exit
-
 
 Test 'd2d9 write-protected attribute is backed up' {
     $protectedFile = AddRandomFile
 
-    $protectedFile | Set-ItemProperty -Name ReadOnly -Value $true 
+    $protectedFile.Attributes = "ReadOnly"
 
     RunBackup
 
@@ -332,10 +332,22 @@ Test 'd2d9 write-protected attribute is backed up' {
         'backup file not found'
     }
 
-    $targetProtected = @(ls -r backups\_latest | ? { $_.Name -eq $protectedFile.Name })[0] | Get-ItemPropertyValue -Name ReadOnly
+    $targetFile = ls -r backups\_latest | ? { $_.Name -eq $protectedFile.Name }
+    $targetProtected = ($targetFile.Attributes -band [System.IO.FileAttributes]::ReadOnly) -eq [System.IO.FileAttributes]::ReadOnly
+    
     if (-not $targetProtected) {
         'backup file is not write-protected'
     }
+}
+
+
+Test '1fb6 multiple log directories were created' {
+    
+    $logDirectories = @(ls .\backups -Directory | ?{ $_.Name -match '^[\d\.-]+$' })
+
+    if(-not $logDirectories.Length -gt 5){
+        'a little few backup log directories for the amount of tests that ran, dont you think?'   
+    }    
 }
 
 Test '2685 backupignore single file' {
