@@ -125,19 +125,19 @@ if($Error.Count -ne $priorErrorCount) {
 function Main () {
  	"Checking _latest\ integrity..." # ============================================================================================
 # ====================================================================================================================
-	if([System.IO.File]::Exists($latestStateFile)) {
-		$expectedLatestHash = gc $latestStateFile
-	}
-	$actualLatestHash = Get-DirectoryHash $latestDirectory -HashBehaviour ContentAndPath
+	#if([System.IO.File]::Exists($latestStateFile)) {
+	#	$expectedLatestHash = gc $latestStateFile
+	#}
+	#$actualLatestHash = Get-DirectoryHash $latestDirectory -HashBehaviour ContentAndPath
 
-	if(($expectedLatestHash -ne $null) -and ($expectedLatestHash -ne $actualLatestHash)) {
-		Write-Error "_latest\ state: '$actualLatestHash', should be '$expectedLatestHash'"
-		"TODO: recover? rescan? what?"
-		Exit
-	}
-	else {
-		"_latest\ state: '$actualLatestHash', should be '$expectedLatestHash' (OK)"
-	}
+	#if(($expectedLatestHash -ne $null) -and ($expectedLatestHash -ne $actualLatestHash)) {
+	#	Write-Error "_latest\ state: '$actualLatestHash', should be '$expectedLatestHash'"
+	#	"TODO: recover? rescan? what?"
+	#	Exit
+	#}
+	#else {
+	#	"_latest\ state: '$actualLatestHash', should be '$expectedLatestHash' (OK)"
+	#}
 
 	# TODO: Verify hashes
 
@@ -231,14 +231,14 @@ function Main () {
 
 	"Finishing up..." # ==========================================================================================================
 
-	$actualLatestHash = Get-DirectoryHash $latestDirectory -HashBehaviour ContentAndPath
-	$actualLatestHash > $latestStateFile
+	#$$actualLatestHash = Get-DirectoryHash $latestDirectory -HashBehaviour ContentAndPath
+	#$actualLatestHash > $latestStateFile
 
 	# TODO: also backup _ignore file ?
 
 	"removed $rmcnt files, added $newcnt files, updated $updcnt files since last backup"
 	"$($Error.Count) error(s)"
-	"updated _latestState: '$actualLatestHash'"
+	#"updated _latestState: '$actualLatestHash'"
 	"Done"
 }
 Main *>&1 | %{ $_; $_ >> $journalFile }
