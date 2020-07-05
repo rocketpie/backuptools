@@ -3,7 +3,11 @@
 		Incrementally back up files to a target directory
 
 	.DESCRIPTION
-		
+        TODO: Optimize Workflow: 
+            1. diff origin <> backup
+            2. move changed files backup > updated
+            2. move extra files backup > deleted
+            3. robocopy /mir origin > backup
 	
     .EXAMPLE
         backup \sourcedir \targetdir
@@ -27,7 +31,7 @@ Param(
 # ==================================================================================================================
 
 function EnsureDirectory($filePath) {
-    mkdir (Split-Path $filePath) -ErrorAction SilentlyContinue | Out-Null
+    mkdir (Split-Path $filePath) -ErrorAction Ignore | Out-Null
 }
 
 # make value into human readable one-line string

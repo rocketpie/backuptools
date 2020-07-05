@@ -106,17 +106,20 @@ function DiffList([string[]]$sourceList, [string[]]$targetList, $ItemsDiffer) {
 }
 
 
-$ecnt = $Error.Count
+$errorCountBeforeStart = $Error.Count
 
 $SourceDir = get-item $SourcePath
 $targetDir = get-item $targetPath
 
-if ($Error.Count -ne $ecnt) { exit } # can't find directories or somethin
+if ($Error.Count -ne $errorCountBeforeStart) { exit } # can't find directories or somethin
 
-# get sorted file lists of both directories. ls seems to produce sorted output, but only within, not across directories with -Recurse
+# get comparable lists of both directories
+# -File to exclude empty directories (TODO: Why, exactly, is this a problem?)
+# -Force to include hidden files 
+# sort because Get-ChildItem produces sorted output within, but not across directories (-Recurse)
 # remove common root path (including '\' that was not part of the dir.FullName) to get comparable relative names. 
-$sourceFiles = @(ls -Recurse -File $SourceDir | % { $_.FullName.Substring($SourceDir.FullName.Length + 1) } | sort )
-$targetFiles = @(ls -Recurse -File $targetDir | % { $_.FullName.Substring($targetDir.FullName.Length + 1) } | sort)
+$sourceFiles = @(ls -Recurse -File $SourceDir -Force | % { $_.FullName.Substring($SourceDir.FullName.Length + 1) } | sort)
+$targetFiles = @(ls -Recurse -File $targetDir -Force | % { $_.FullName.Substring($targetDir.FullName.Length + 1) } | sort)
 
 $fileDiff = DiffList $sourceFiles $targetFiles { 
     Param($filename)    
