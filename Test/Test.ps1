@@ -366,5 +366,9 @@ Test '0270 backupignore pattern' {
     'not implemented'
 }
 
+Test '3aa5 errors get logged' {
+    'not implemented'
+}
+
 # restore working path
 cd $prevWorkingPath
