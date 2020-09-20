@@ -26,6 +26,10 @@ Param(
     [switch]
     $Confirm
 )
+
+if($PSBoundParameters['Debug']){
+    $DebugPreference = 'Continue'
+}
     
 # Functions ========================================================================================================
 # ==================================================================================================================
@@ -44,12 +48,12 @@ function Print($value) {
 # debugging: print variable name with it's value
 function DebugVar($varName) {
     $value = (get-item variable:$varName).Value
-    Write-Debug "$($varName.PadRight(15)): $(Print $value)"
+    Write-Debug "$($varName.PadRight(18)): $(Print $value)"
 }
 
 # output debugging inspection
 function DebugOutput($name, $value) {    
-    Write-Debug "$($name.PadRight(15)): $(Print $value)"    
+    Write-Debug "$($name.PadRight(18)): $(Print $value)"    
 }
 
 # Preparation ======================================================================================================

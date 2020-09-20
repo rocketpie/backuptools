@@ -55,6 +55,62 @@ class DiffData {
     [System.Collections.Generic.List[string]]$Exit
 }
 
+# ~ToString(): convert value into human readable, log-printable (one-line) string
+function Print($value) {
+    $value | Out-string
+}
+
+# debugging: print variable name with it's value
+function DebugVar($varName) {
+    $value = (get-item variable:$varName).Value
+    Write-Debug "$($varName.PadRight(18)): $(Print $value)"
+}
+
+# given two *sorted* lists,
+# remove all elements from the first list
+# that .StartsWith any element from the second list
+function ApplyExcludeList {
+    param (
+        [array]$Source,
+        [array]$ExcludeList,
+        [string]$DebugMessage
+    )
+    
+    if(($Source.Count -lt 1) -or ($excludeList.Count -lt 1)){
+        $Source
+        return        
+    }
+    
+    $sourceList = [System.Collections.ArrayList]::new($Source)
+    
+    # sorted-walk both lists simultaneously to avoid most overhead
+    $sIdx = 0 # soruce index
+    $eIdx = 0 # exclude index
+    do{
+        $excludePattern = $excludeList[$eIdx]
+        
+        if ($sourceList[$sIdx].StartsWith($excludePattern)) {
+            Write-Debug "$DebugMessage '$($sourceList[$sIdx])'"
+            $sourceList.RemoveAt($sIdx)
+        }
+        else{
+            $compare = $sourceList[$sIdx].CompareTo($excludePattern)
+            if($compare -lt 0){
+                $sIdx++
+            }
+            elseif($compare -gt 0){
+                $eIdx++
+            }
+            else {
+                $sIdx++
+                $eIdx++
+            }
+        }
+    } while (($sourceList.Count -gt $sIdx) -and ($ExcludeList.Length -gt $eIdx))
+    
+    $sourceList
+}
+    
 # $compareItems: function($item) { [bool] } predicate: return if items present in source and target differ
 function DiffList([string[]]$sourceList, [string[]]$targetList, $ItemsDiffer) {
     $result = New-Object DiffData
@@ -120,6 +176,59 @@ if ($Error.Count -ne $errorCountBeforeStart) { exit } # can't find directories o
 # remove common root path (including '\' that was not part of the dir.FullName) to get comparable relative names. 
 $sourceFiles = @(ls -Recurse -File $SourceDir -Force | % { $_.FullName.Substring($SourceDir.FullName.Length + 1) } | sort)
 $targetFiles = @(ls -Recurse -File $targetDir -Force | % { $_.FullName.Substring($targetDir.FullName.Length + 1) } | sort)
+
+$ignoreFiles = @($sourceFiles | ?{ $_.EndsWith('.backupignore') })
+Debugvar ignoreFiles
+
+$excludeList = New-Object System.Collections.ArrayList
+if($ignoreFiles.Count -gt 0) {
+    
+    $ignoreFiles | %{
+        $fullname = Join-Path $SourceDir $_
+        $patterns = @(gc $fullname)
+        if ($Error.Count -ne $errorCountBeforeStart) { 
+            Write-Error "cant read file: '$fullname'"
+            exit 
+        } 
+        
+        # 'a\b\.backupignore' => 'a\b\'
+        $parentPath = $_.SubString(0, $_.length - '.backupignore'.Length)
+        
+        $patterns | ?{ -not $_.StartsWith('!') } | %{ 
+            # 'a\b\' '\file.txt' => 'a\b\file.txt'
+            $fullPattern = "$($parentPath)$($_)"
+
+            $sourceFiles | %{ # ignoreFiles -> ignorePatterns -> sourceFiles is some heavy nesting - can we optimize? maybe partially exclude during ls before merging and sorting? 
+                # or maybe collect all patterns, then dedup, then sorted-walk both collections simultaneously? (don't need to test patterns 'g...' when you're at 'a...' and vice vers)
+
+                if($_.StartsWith($fullPattern)) {
+                    $excludeList.Add($_) | Out-Null
+                }
+            }
+        }
+
+        $notExcludeList = New-Object System.Collections.ArrayList # find 'do-not-exclude' files by applying them like an exclude-list to the excluded files - because we already know how to do that.
+        $patterns | ?{ $_.StartsWith('!') } | %{
+            # 'a\b\' '!file.txt' => 'a\b\file.txt'
+            $fullPattern = "$($parentPath)$($_.Substring(1))"
+            
+            $excludeList | %{
+                if($_.StartsWith($fullPattern)) {
+                    $notExcludeList.Add($_) | Out-Null
+                }
+            }
+        }
+    }
+
+    $excludeList = @($excludeList | sort)
+    $notExcludeList = @($notExcludeList | sort)
+    
+    Debugvar excludeList
+    Debugvar notExcludeList
+
+    $excludeList = @(ApplyExcludeList $excludeList $notExcludeList 'not-ignoring')
+    $sourceFiles = @(ApplyExcludeList $sourceFiles $excludeList 'ignoring')
+}
 
 $fileDiff = DiffList $sourceFiles $targetFiles { 
     Param($filename)    

@@ -19,8 +19,11 @@ param (
     [string]
     $SpecificTest = ""
 )
-    
-#$DebugPreference = 'Continue'
+
+if($PSBoundParameters['Debug']){
+    $DebugPreference = 'Continue'
+}
+
 $Global:specificTest = $SpecificTest
 
 
@@ -350,16 +353,15 @@ Test '1fb6 multiple log directories were created' {
     }    
 }
 
-Test '2685 backupignore single file' {
+Test '2685 backupignore single file, ignore from the same directory' {
     ResetSandbox
 
     $file = AddRandomFile
+    $filePath = Split-Path $file
     $filename = Split-Path $file -Leaf
-    $file > '.\source\.backupignore'
+    $filename > (Join-Path $filePath '.backupignore')
     
     RunBackup
-
-
 
     $log = ReadLogFile
     if (($log | Select-String $filename)) {
@@ -382,6 +384,19 @@ Test '0270 backupignore pattern' {
 Test '3aa5 errors get logged' {
     'not implemented'
 }
+
+Test '1234 call backup source/ target/' {
+    'not implemented'
+}
+
+Test '1235 call backup source target' {
+    'not implemented'
+}
+
+Test '12365 call backup source\ target\' {
+    'not implemented'
+}
+
 
 # restore working path
 cd $prevWorkingPath
