@@ -30,16 +30,18 @@ Param(
 # Functions ========================================================================================================
 # ==================================================================================================================
 
+# given a path to a *file*, 
+# Create the file's parent directory if it does not exist.
 function EnsureDirectory($filePath) {
     mkdir (Split-Path $filePath) -ErrorAction Ignore | Out-Null
 }
 
-# make value into human readable one-line string
+# ~ToString(): convert value into human readable, log-printable (one-line) string
 function Print($value) {
     $value.ToString() # hack this for now...
 }
 
-# output variable by name for debugging
+# debugging: print variable name with it's value
 function DebugVar($varName) {
     $value = (get-item variable:$varName).Value
     Write-Debug "$($varName.PadRight(15)): $(Print $value)"
@@ -63,13 +65,17 @@ $SourcePath = Resolve-Path $SourcePath
 DebugVar 'SourcePath'
 if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot find source directory '$SourcePath'"; exit }
 
+# resolve target path even if it does not yet exist
+$TargetPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($TargetPath)
+DebugVar 'TargetPath'
+
+# ensure target path exists
 if (-not (Test-Path $TargetPath)) {
     mkdir $TargetPath | Out-Null
+    if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot create target directory '$TargetPath'"; exit }
 }
-$TargetPath = Resolve-Path $TargetPath
-DebugVar 'TargetPath'
-if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot find or create target directory '$TargetPath'"; exit }
 
+# ensure _latest path exists
 $latestDirPath = Join-Path $TargetPath '_latest'
 DebugVar 'latestDirPath'
 if (-not (Test-Path $latestDirPath)) {
@@ -77,6 +83,7 @@ if (-not (Test-Path $latestDirPath)) {
     if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot create _latest directory '$latestDirPath'"; exit }
 }
 
+# determine and create log directory
 $logDirName = "$(Get-Date -f 'yyyy-MM-dd')"
 $revision = 0
 do {
@@ -87,19 +94,20 @@ DebugVar 'logDirPath'
 mkdir $logDirPath | Out-Null
 if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot create log directory '$logDirPath'"; exit }
 
+# create log file
 $logFile = (Join-Path $logDirPath 'log.txt')
 DebugVar 'logFile'
 "Backing up '$SourcePath'" >> $logFile
 if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot write log file"; exit }
 
 
-function Main($SourcePath, $latestDirPath, $logDirPath, $scriptPath) {    
+function Main($scriptPath, $SourcePath, $latestDirPath, $logDirPath) {    
     $deletedDirPath = Join-Path $logDirPath deleted
     $updatedDirPath = Join-Path $logDirPath updated
 
     # Step 1: Determine changes ====================================================================================
     # ==============================================================================================================    
-    $changes = &$scriptPath\Compare-Directories.ps1 $SourcePath $latestDirPath
+    $changes = &(join-path $scriptPath Compare-Directories.ps1) $SourcePath $latestDirPath
     "$($changes.Enter.Count) new files, $($changes.Update.Count) files changed, $($changes.Exit.Count) files deleted"
     if (-not $Confirm) {
         if ('y' -ne (Read-Host 'Sounds right? (y)').ToLower()) {
@@ -136,4 +144,4 @@ function Main($SourcePath, $latestDirPath, $logDirPath, $scriptPath) {
     }
 }
 
-Main $SourcePath $latestDirPath $logDirPath $scriptPath 2>&1 | % { $_ >> $logFile; $_ }
+Main $scriptPath $SourcePath $latestDirPath $logDirPath 2>&1 | % { $_ >> $logFile; $_ }

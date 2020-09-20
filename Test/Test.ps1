@@ -158,7 +158,7 @@ function ReadLogFile {
 # Tests ============================================================================================================
 # ==================================================================================================================
 Test '4002 EXPECT FAILURE' {
-    'this self test must show up as failed'
+    'this test self-test must show up as failed'
 }
 
 ResetSandbox
@@ -353,9 +353,22 @@ Test '1fb6 multiple log directories were created' {
 Test '2685 backupignore single file' {
     ResetSandbox
 
-    '1' > '.\source\.backupignore'
+    $file = AddRandomFile
+    $filename = Split-Path $file -Leaf
+    $file > '.\source\.backupignore'
     
-    'not implemented'
+    RunBackup
+
+
+
+    $log = ReadLogFile
+    if (($log | Select-String $filename)) {
+        'new file is not being ignored'
+    }
+
+    if (-not ($log | Select-String 'backupignore')) {
+        'backupignore file is being ignored'
+    }
 }
 
 Test '545d backupignore directory' {
