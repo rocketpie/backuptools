@@ -76,9 +76,8 @@ function ApplyExcludeList {
         [string]$DebugMessage
     )
     
-    if(($Source.Count -lt 1) -or ($excludeList.Count -lt 1)){
-        $Source
-        return        
+    if (($Source.Count -lt 1) -or ($excludeList.Count -lt 1)) {
+        return $Source                
     }
     
     $sourceList = [System.Collections.ArrayList]::new($Source)
@@ -86,32 +85,35 @@ function ApplyExcludeList {
     # sorted-walk both lists simultaneously to avoid most overhead
     $sIdx = 0 # soruce index
     $eIdx = 0 # exclude index
-    do{
+    do {
         $excludePattern = $excludeList[$eIdx]
         
         if ($sourceList[$sIdx].StartsWith($excludePattern)) {
             Write-Debug "$DebugMessage '$($sourceList[$sIdx])'"
             $sourceList.RemoveAt($sIdx)
         }
-        else{
+        else {
             $compare = $sourceList[$sIdx].CompareTo($excludePattern)
-            if($compare -lt 0){
+            if ($compare -lt 0) { 
+                # assumption: most files are not ignored. Most common case: source file is before the next ignore pattern
                 $sIdx++
             }
-            elseif($compare -gt 0){
+            elseif ($compare -gt 0) {
                 $eIdx++
             }
-            else {
+            else <# ($compare -eq 0) #> {
                 $sIdx++
                 $eIdx++
             }
         }
     } while (($sourceList.Count -gt $sIdx) -and ($ExcludeList.Length -gt $eIdx))
     
-    $sourceList
+    return $sourceList
 }
-    
-# $compareItems: function($item) { [bool] } predicate: return if items present in source and target differ
+
+# given two *sorted* relative file path listings, and
+# $ItemsDiffer: [bool] function($filePath) a predicate that returns wether an item that's present in source and target differ
+# this function returns DiffData, an object representing which items exist only in source, only in target, or both 
 function DiffList([string[]]$sourceList, [string[]]$targetList, $ItemsDiffer) {
     $result = New-Object DiffData
     
@@ -124,8 +126,8 @@ function DiffList([string[]]$sourceList, [string[]]$targetList, $ItemsDiffer) {
         $targetItem = $targetList[$tIdx]
         $compare = $sourceItem.CompareTo($targetItem)
 
-        Write-Debug "'$sourceItem'.CompareTo('$targetItem'): $compare"
-        if ($compare -eq 0) {
+        if ($compare -eq 0) { 
+            # most common case: file is up-to-date
             $sIdx++;
             $tIdx++;
             if ([bool](&$ItemsDiffer $sourceItem)) {
@@ -177,13 +179,13 @@ if ($Error.Count -ne $errorCountBeforeStart) { exit } # can't find directories o
 $sourceFiles = @(ls -Recurse -File $SourceDir -Force | % { $_.FullName.Substring($SourceDir.FullName.Length + 1) } | sort)
 $targetFiles = @(ls -Recurse -File $targetDir -Force | % { $_.FullName.Substring($targetDir.FullName.Length + 1) } | sort)
 
-$ignoreFiles = @($sourceFiles | ?{ $_.EndsWith('.backupignore') })
+$ignoreFiles = @($sourceFiles | ? { $_.EndsWith('.backupignore') })
 Debugvar ignoreFiles
 
 $excludeList = New-Object System.Collections.ArrayList
-if($ignoreFiles.Count -gt 0) {
+if ($ignoreFiles.Count -gt 0) {
     
-    $ignoreFiles | %{
+    $ignoreFiles | % {
         $fullname = Join-Path $SourceDir $_
         $patterns = @(gc $fullname)
         if ($Error.Count -ne $errorCountBeforeStart) { 
@@ -194,26 +196,26 @@ if($ignoreFiles.Count -gt 0) {
         # 'a\b\.backupignore' => 'a\b\'
         $parentPath = $_.SubString(0, $_.length - '.backupignore'.Length)
         
-        $patterns | ?{ -not $_.StartsWith('!') } | %{ 
+        $patterns | ? { -not $_.StartsWith('!') } | % { 
             # 'a\b\' '\file.txt' => 'a\b\file.txt'
             $fullPattern = "$($parentPath)$($_)"
 
-            $sourceFiles | %{ # ignoreFiles -> ignorePatterns -> sourceFiles is some heavy nesting - can we optimize? maybe partially exclude during ls before merging and sorting? 
+            $sourceFiles | % { # ignoreFiles -> ignorePatterns -> sourceFiles is some heavy nesting - can we optimize? maybe partially exclude during ls before merging and sorting? 
                 # or maybe collect all patterns, then dedup, then sorted-walk both collections simultaneously? (don't need to test patterns 'g...' when you're at 'a...' and vice vers)
 
-                if($_.StartsWith($fullPattern)) {
+                if ($_.StartsWith($fullPattern)) {
                     $excludeList.Add($_) | Out-Null
                 }
             }
         }
 
         $notExcludeList = New-Object System.Collections.ArrayList # find 'do-not-exclude' files by applying them like an exclude-list to the excluded files - because we already know how to do that.
-        $patterns | ?{ $_.StartsWith('!') } | %{
+        $patterns | ? { $_.StartsWith('!') } | % {
             # 'a\b\' '!file.txt' => 'a\b\file.txt'
             $fullPattern = "$($parentPath)$($_.Substring(1))"
             
-            $excludeList | %{
-                if($_.StartsWith($fullPattern)) {
+            $excludeList | % {
+                if ($_.StartsWith($fullPattern)) {
                     $notExcludeList.Add($_) | Out-Null
                 }
             }
