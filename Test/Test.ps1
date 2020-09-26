@@ -33,8 +33,14 @@ class TestContext {
         $this.Random = New-Object System.Random
     }
 
+    # location of this script
     [string]$TestScriptPath
-    [string]$BackupScriptPath
+    # location of backup.ps1 script
+    [string]$BackupScriptPath    
+    # source directory to back up
+    [string]$TestSourcePath
+    # target directory / backup location
+    [string]$TestTargetPath
     [System.Random]$Random
     
     [int]$BackupRuns
@@ -45,10 +51,8 @@ class TestContext {
 $global:Context = New-Object TestContext
 $global:Context.TestScriptPath = Split-path $MyInvocation.MyCommand.Definition
 $global:Context.BackupScriptPath = Split-Path (Get-Command backup.ps1).Definition
-
-# make sure we're in the test directory
-$prevWorkingPath = Get-Location
-cd $global:Context.TestScriptPath
+$global:Context.TestSourcePath = Join-Path $global:Context.TestScriptPath 'source'
+$global:Context.TestTargetPath = Join-Path $global:Context.TestScriptPath 'backups'
 
 # Functions ========================================================================================================
 # ==================================================================================================================
@@ -58,35 +62,35 @@ function ResetSandbox {
     $global:Context.CurrentLogDir = $null
     
     # re setup source dirs
-    rm .\source -Recurse -Force
-    mkdir .\source | Out-Null
-    mkdir .\source\a | Out-Null
-    mkdir .\source\a\a | Out-Null
-    mkdir .\source\a\a\a | Out-Null
-    mkdir .\source\a\b | Out-Null
-    mkdir .\source\a\1 | Out-Null
-    mkdir .\source\a\2 | Out-Null
-    mkdir .\source\b | Out-Null
-    mkdir .\source\1 | Out-Null
-    mkdir .\source\1\1 | Out-Null
-    mkdir .\source\1\2 | Out-Null
-    mkdir .\source\1\a | Out-Null
-    mkdir .\source\1\f | Out-Null
-    mkdir .\source\2 | Out-Null
+    rm $global:Context.TestSourcePath -Recurse -Force
+    mkdir $global:Context.TestSourcePath | Out-Null
+    mkdir (Join-Path $global:Context.TestSourcePath 'a') | Out-Null
+    mkdir (Join-Path $global:Context.TestSourcePath 'a\a') | Out-Null
+    mkdir (Join-Path $global:Context.TestSourcePath 'a\a\a') | Out-Null
+    mkdir (Join-Path $global:Context.TestSourcePath 'a\b') | Out-Null
+    mkdir (Join-Path $global:Context.TestSourcePath 'a\1') | Out-Null
+    mkdir (Join-Path $global:Context.TestSourcePath 'a\2') | Out-Null
+    mkdir (Join-Path $global:Context.TestSourcePath 'b') | Out-Null
+    mkdir (Join-Path $global:Context.TestSourcePath '1') | Out-Null
+    mkdir (Join-Path $global:Context.TestSourcePath '1\1') | Out-Null
+    mkdir (Join-Path $global:Context.TestSourcePath '1\2') | Out-Null
+    mkdir (Join-Path $global:Context.TestSourcePath '1\a') | Out-Null
+    mkdir (Join-Path $global:Context.TestSourcePath '1\f') | Out-Null
+    mkdir (Join-Path $global:Context.TestSourcePath '2') | Out-Null
 
-    rm .\backups -Recurse -Force -ErrorAction 'SilentlyContinue' | Out-Null 
+    rm $global:Context.TestTargetPath -Recurse -Force -ErrorAction 'SilentlyContinue' | Out-Null 
 }
 
 # silently executes backup .\source .\backups
 function RunBackup {
-    backup.ps1 .\source .\backups -Confirm | Out-Null
+    backup.ps1 $global:Context.TestSourcePath $global:Context.TestTargetPath -Confirm | Out-Null
     $global:Context.BackupRuns++
-    $global:Context.CurrentLogDir = @(ls -Directory .\backups | ? { $_.Name.EndsWith(".$($global:Context.BackupRuns)") })[0]
+    $global:Context.CurrentLogDir = @(ls -Directory $global:Context.TestTargetPath | ? { $_.Name.EndsWith(".$($global:Context.BackupRuns)") })[0]
 }
 
 # return 
 function GetDiff {
-    & (Join-Path $global:Context.BackupScriptPath Compare-Directories.ps1) .\source .\backups\_latest
+    & (Join-Path $global:Context.BackupScriptPath Compare-Directories.ps1) $global:Context.TestSourcePath (join-path $global:Context.TestTargetPath '_latest')
 }
 
 # interprets objects returned from tests as errors
@@ -118,14 +122,14 @@ function RandomString {
 function RandomNewFilePath {
     $filename = RandomString
     
-    $dirs = ls .\source -Recurse -Directory
-    $dirs += @(get-item .\source)
+    $dirs = ls $global:Context.TestSourcePath -Recurse -Directory
+    $dirs += @(get-item $global:Context.TestSourcePath)
 
     join-path $dirs[$global:Context.Random.Next($dirs.Length)].Fullname $filename
 }
 
 function RandomSourceFile {
-    $allfiles = @(ls .\source -Recurse -File)    
+    $allfiles = @(ls $global:Context.TestSourcePath -Recurse -File)    
     if ($allfiles) {        
         $allfiles[$global:Context.Random.Next($allfiles.Length)]
     }
@@ -170,9 +174,9 @@ ResetSandbox
 Test '4033 run without backup dir existing should create backup dir, copy of source, and log' {
     RunBackup
 
-    if (-not (Test-Path .\backups)) { 'target dir missing' }
-    if (-not (Test-Path .\backups\_latest)) { '_latest dir missing' }
-    if (@(ls .\backups -Recurse -File 'log.txt').Length -ne 1) { 'log file missing' }
+    if (-not (Test-Path $global:Context.TestTargetPath)) { 'target dir missing' }
+    if (-not (Test-Path (Join-Path $global:Context.TestTargetPath '_latest'))) { '_latest dir missing' }
+    if (@(ls $global:Context.TestTargetPath -Recurse -File 'log.txt').Length -ne 1) { 'log file missing' }
     $diff = GetDiff
     if ($diff.Total -gt 0) { '_latest is not a copy of source' }
 }
@@ -184,7 +188,7 @@ Test '4d40 add file: should find backup in _latest' {
 
     RunBackup
 
-    $backedUpFile = ls .\backups\_latest -Recurse -File | ? { $_.Name -eq $file.Name }
+    $backedUpFile = ls (Join-Path $global:Context.TestTargetPath '_latest') -Recurse -File | ? { $_.Name -eq $file.Name }
     if (-not $backedUpFile) { 'nope' }
 }
 
@@ -277,12 +281,12 @@ Test '242d edit file: should find both versions in backup' {
     
     RunBackup
 
-    $testContent = (ls .\backups\_latest -Recurse -File | ? { $_.name -eq $testFile.name } | gc )
+    $testContent = (ls (Join-Path $global:Context.TestTargetPath '_latest') -Recurse -File | ? { $_.name -eq $testFile.name } | gc )
     if ($newContent -ne $testContent) {
         "updated content not found in _latest (expected '$newContent', found '$testContent')"
     }
 
-    $testContent = (ls .\backups -Recurse -File | ? { ($_.name -eq $testFile.name) -and ($_.FullName -notmatch '\\_latest\\') } | gc )
+    $testContent = (ls $global:Context.TestTargetPath -Recurse -File | ? { ($_.name -eq $testFile.name) -and ($_.FullName -notmatch '\\_latest\\') } | gc )
     if ($oldContent -ne $testContent) {
         "prior content not found in log file (expected '$oldContent', found '$testContent')"
     }
@@ -317,7 +321,7 @@ Test 'c5ee hidden files are backed up' {
     }
 
     $filename = Split-Path -Leaf $hiddenFile
-    if (@(ls backups\_latest -Recurse -File -Force | ? { $_.name -eq $filename }).Length -ne 1) {
+    if (@(ls (Join-Path $global:Context.TestTargetPath '_latest') -Recurse -File -Force | ? { $_.name -eq $filename }).Length -ne 1) {
         'file not found in _latest'
     }
 }
@@ -330,12 +334,12 @@ Test 'd2d9 write-protected attribute is backed up' {
 
     RunBackup
 
-    $file = @(ls -r backups\_latest | ? { $_.Name -eq $protectedFile.Name })[0]
+    $file = @(ls -r (Join-Path $global:Context.TestTargetPath '_latest') | ? { $_.Name -eq $protectedFile.Name })[0]
     if (-not $file) {
         'backup file not found'
     }
 
-    $targetFile = ls -r backups\_latest | ? { $_.Name -eq $protectedFile.Name }
+    $targetFile = ls -r (Join-Path $global:Context.TestTargetPath '_latest') | ? { $_.Name -eq $protectedFile.Name }
     $targetProtected = ($targetFile.Attributes -band [System.IO.FileAttributes]::ReadOnly) -eq [System.IO.FileAttributes]::ReadOnly
     
     if (-not $targetProtected) {
@@ -346,7 +350,7 @@ Test 'd2d9 write-protected attribute is backed up' {
 
 Test '1fb6 multiple log directories were created' {
     
-    $logDirectories = @(ls .\backups -Directory | ?{ $_.Name -match '^[\d\.-]+$' })
+    $logDirectories = @(ls $global:Context.TestTargetPath -Directory | ?{ $_.Name -match '^[\d\.-]+$' })
 
     if(-not $logDirectories.Length -gt 5){
         'a little few backup log directories for the amount of tests that ran, dont you think?'   
@@ -373,8 +377,46 @@ Test '2685 backupignore single file, ignore from the same directory' {
     }
 }
 
+Test '2685 backupignore single file, ignore from root directory' {
+    ResetSandbox
+
+    $file = AddRandomFile    
+    $filename = Split-Path $file -Leaf
+    $relativeFilename = $file.Fullname.Substring($global:Context.TestSourcePath.Length)
+    $relativeFilename > (Join-Path $global:Context.TestSourcePath '.backupignore')
+    
+    RunBackup
+
+    $log = ReadLogFile
+    if (($log | Select-String $filename)) {
+        'new file is not being ignored'
+    }
+
+    if (-not ($log | Select-String 'backupignore')) {
+        'backupignore file is being ignored'
+    }
+}
+
+
 Test '545d backupignore directory' {
-    'not implemented'
+    ResetSandbox
+
+    $file = AddRandomFile
+    $filename = Split-Path $file -Leaf
+    $filePath = Split-Path $file
+    $relativeFilepath = $filePath.Substring($global:Context.TestSourcePath.Length)
+    $relativeFilepath > (Join-Path $global:Context.TestSourcePath '.backupignore')
+    
+    RunBackup
+
+    $log = ReadLogFile
+    if (($log | Select-String $filename)) {
+        'new file is not being ignored'
+    }
+
+    if (-not ($log | Select-String 'backupignore')) {
+        'backupignore file is being ignored'
+    }
 }
 
 Test '0270 backupignore pattern' {
@@ -397,6 +439,3 @@ Test '12365 call backup source\ target\' {
     'not implemented'
 }
 
-
-# restore working path
-cd $prevWorkingPath
