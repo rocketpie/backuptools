@@ -382,7 +382,7 @@ Test '2685 backupignore single file, ignore from root directory' {
 
     $file = AddRandomFile    
     $filename = Split-Path $file -Leaf
-    $relativeFilename = $file.Fullname.Substring($global:Context.TestSourcePath.Length)
+    $relativeFilename = $file.Fullname.Substring($global:Context.TestSourcePath.Length + 1)
     $relativeFilename > (Join-Path $global:Context.TestSourcePath '.backupignore')
     
     RunBackup
@@ -404,7 +404,7 @@ Test '545d backupignore directory' {
     $file = AddRandomFile
     $filename = Split-Path $file -Leaf
     $filePath = Split-Path $file
-    $relativeFilepath = $filePath.Substring($global:Context.TestSourcePath.Length)
+    $relativeFilepath = $filePath.Substring($global:Context.TestSourcePath.Length + 1)
     $relativeFilepath > (Join-Path $global:Context.TestSourcePath '.backupignore')
     
     RunBackup
