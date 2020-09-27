@@ -291,7 +291,7 @@ Test '242d edit file: should find both versions in backup' {
 
     $testContent = (ls $global:Context.TestTargetPath -Recurse -File | ? { ($_.name -eq $testFile.name) -and ($_.FullName -notmatch '\\_latest\\') } | gc )
     if ($oldContent -ne $testContent) {
-        "prior content not found in log file (expected '$oldContent', found '$testContent')"
+        'prior file content not found in $log/updated location'
     }
 }
 
@@ -400,12 +400,15 @@ Test '2685 backupignore single file, ignore from root directory' {
 
 
 Test '545d backupignore directory' {    
+    # avoid ignoring the root directory, because ignoring '' isn't looking good in the ignore file.
+    do {
+        $file = AddRandomFile
+        $directory = Split-Path $file
+    } while ($directory -eq $global:Context.TestSourcePath)
 
-    $file = AddRandomFile
     $filename = Split-Path $file -Leaf
-    $filePath = Split-Path $file
-    $relativeFilepath = $filePath.Substring($global:Context.TestSourcePath.Length + 1)
-    $relativeFilepath > (Join-Path $global:Context.TestSourcePath '.backupignore')
+    $relativeDirectoryPath = $directory.Substring($global:Context.TestSourcePath.Length + 1)
+    $relativeDirectoryPath > (Join-Path $global:Context.TestSourcePath '.backupignore')
     
     RunBackup
 
@@ -419,8 +422,34 @@ Test '545d backupignore directory' {
     }
 }
 
-Test '0270 backupignore pattern' {
-    'not implemented'
+
+Test '0270 backupignore "not" pattern' {
+    # avoid ignoring the root directory, because ignoring '' isn't looking good in the ignore file.
+    do {
+        $importantFile = AddRandomFile
+        $directory = Split-Path $importantFile
+    } while ($directory -eq $global:Context.TestSourcePath)
+
+
+    $otherFiles = 1..10 | %{ $name = RandomString; RandomString > (Join-Path $directory $name); $name }
+
+    $relativeDirectoryPath = $directory.Substring($global:Context.TestSourcePath.Length + 1)
+    $relativeDirectoryPath >> (Join-Path $global:Context.TestSourcePath '.backupignore')
+
+    $relativeImportantFilePath = $importantFile.Fullname.Substring($global:Context.TestSourcePath.Length + 1)
+    "!$relativeImportantFilePath" >> (Join-Path $global:Context.TestSourcePath '.backupignore')
+
+    
+    $log = ReadLogFile
+    if (-not ($log | Select-String $importantFile.Name)) {
+        'important file being ignored'
+    }
+
+    $otherFiles | %{
+        if (($log | Select-String $_)) {
+            'important file being ignored'
+        }
+    }
 }
 
 Test '3aa5 errors get logged' {
