@@ -236,8 +236,9 @@ $fileDiff = DiffList $sourceFiles $targetFiles {
     Param($filename)    
     # matching files: include in Update selection or not? 
 
-    $sourceFile = Get-Item (Join-Path $SourcePath $filename)
-    $targetFile = Get-Item (Join-Path $TargetPath $filename)
+    # -Force get-item to work with hidden files
+    $sourceFile = Get-Item (Join-Path $SourcePath $filename) -Force
+    $targetFile = Get-Item (Join-Path $TargetPath $filename) -Force
 
     if ($sourceFile.Length -ne $targetFile.Length) {
         Write-Debug "different Length"
