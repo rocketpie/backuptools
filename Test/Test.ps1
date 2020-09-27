@@ -399,8 +399,8 @@ Test '2685 backupignore single file, ignore from root directory' {
 }
 
 
-Test '545d backupignore directory' {    
-    # avoid ignoring the root directory, because ignoring '' isn't looking good in the ignore file.
+Test '545d backupignore sub directory' {    
+    # avoid trying to ignore the root directory, because it isn't really a subdirectory.
     do {
         $file = AddRandomFile
         $directory = Split-Path $file
@@ -438,7 +438,8 @@ Test '0270 backupignore "not" pattern' {
 
     $relativeImportantFilePath = $importantFile.Fullname.Substring($global:Context.TestSourcePath.Length + 1)
     "!$relativeImportantFilePath" >> (Join-Path $global:Context.TestSourcePath '.backupignore')
-
+    
+    RunBackup
     
     $log = ReadLogFile
     if (-not ($log | Select-String $importantFile.Name)) {
@@ -450,6 +451,10 @@ Test '0270 backupignore "not" pattern' {
             'important file being ignored'
         }
     }
+}
+
+Test "a53a backupignore 'this directory'"{
+    'not implemented'
 }
 
 Test '3aa5 errors get logged' {
