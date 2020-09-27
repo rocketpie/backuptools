@@ -103,12 +103,15 @@ function Test($name, $testScript) {
     }
     "TEST: $name..."
     
+    $priorErrorCount = $Error.Count
     $result = @(&$testScript)
 
-    if ($result.Length -gt 0) {
+    if (($result.Length -gt 0) -or ($Error.Count -gt $priorErrorCount)) {        
         foreach ($err in $result) {
             Write-Warning "FAILED: $err"            
         }
+
+        Write-Warning "There were errors. Log: $($global:Context.CurrentLogDir)"
     }
     else {
         "PASSED"
@@ -358,8 +361,7 @@ Test '1fb6 multiple log directories were created' {
 }
 
 Test '2685 backupignore single file, ignore from the same directory' {
-    ResetSandbox
-
+    
     $file = AddRandomFile
     $filePath = Split-Path $file
     $filename = Split-Path $file -Leaf
@@ -378,8 +380,7 @@ Test '2685 backupignore single file, ignore from the same directory' {
 }
 
 Test '2685 backupignore single file, ignore from root directory' {
-    ResetSandbox
-
+    
     $file = AddRandomFile    
     $filename = Split-Path $file -Leaf
     $relativeFilename = $file.Fullname.Substring($global:Context.TestSourcePath.Length + 1)
@@ -398,8 +399,7 @@ Test '2685 backupignore single file, ignore from root directory' {
 }
 
 
-Test '545d backupignore directory' {
-    ResetSandbox
+Test '545d backupignore directory' {    
 
     $file = AddRandomFile
     $filename = Split-Path $file -Leaf
