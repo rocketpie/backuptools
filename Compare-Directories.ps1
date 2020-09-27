@@ -179,12 +179,12 @@ if ($Error.Count -ne $errorCountBeforeStart) { exit } # can't find directories o
 $sourceFiles = @(ls -Recurse -File $SourceDir -Force | % { $_.FullName.Substring($SourceDir.FullName.Length + 1) } | sort)
 $targetFiles = @(ls -Recurse -File $targetDir -Force | % { $_.FullName.Substring($targetDir.FullName.Length + 1) } | sort)
 
-$ignoreFiles = @($sourceFiles | ? { $_.EndsWith('.backupignore') })
-Debugvar ignoreFiles
-
 $excludeList = New-Object System.Collections.ArrayList
+
+# 1: collect and resolve all .backupignore files' patterns
+$ignoreFiles = @($sourceFiles | ? { $_.EndsWith('.backupignore') }) 
+Debugvar ignoreFiles
 if ($ignoreFiles.Count -gt 0) {
-    
     $ignoreFiles | % {
         $fullname = Join-Path $SourceDir $_
         $patterns = @(gc $fullname)
@@ -222,8 +222,8 @@ if ($ignoreFiles.Count -gt 0) {
         }
     }
 
-    $excludeList = @($excludeList | sort)
-    $notExcludeList = @($notExcludeList | sort)
+    $excludeList = @($excludeList | sort -Unique)
+    $notExcludeList = @($notExcludeList | sort -Unique)
     
     Debugvar excludeList
     Debugvar notExcludeList
