@@ -351,7 +351,7 @@ Test 'd2d9 write-protected attribute is backed up' {
 }
 
 
-Test '1fb6 multiple log directories were created' {
+Test '1fb6 after a few tests, multiple log directories were created' {
     
     $logDirectories = @(ls $global:Context.TestTargetPath -Directory | ?{ $_.Name -match '^[\d\.-]+$' })
 
@@ -359,6 +359,55 @@ Test '1fb6 multiple log directories were created' {
         'a little few backup log directories for the amount of tests that ran, dont you think?'   
     }    
 }
+
+Test '9961 merged .backupignore content is reported in log' {            
+    $testContent = @( RandomString )
+    $testContent > (Join-Path $global:Context.TestSourcePath '.backupignore')
+
+    1..4 | %{ 
+        $randomDir = Split-Path (RandomNewFilePath)
+        $content = RandomString 
+        $content >> (Join-Path $randomDir '.backupignore')
+
+        $testContent += @($content)
+    }
+
+    RunBackup
+
+    $log = ReadLogFile
+
+    $newFiles = @($log | ?{ $_ -match '^new file:' })    
+    $newIgnoreFiles = @($newFiles | ?{$_ -match '^new file: ([\w\\]*)\.backupignore'})
+
+    if($newFiles.Count -gt $newIgnoreFiles.Count){
+        'actual files have been written, log content is unreliable for this test'        
+    }
+
+    $testContent | %{
+        if (-not ($log | Select-String $_)) {
+            "ignore pattern not reported: '$_'"
+        }
+    }
+}
+
+
+Test 'b520 empty line in .backupignore is ignored' {
+    
+    $directory = mkdir (Join-Path $global:Context.TestSourcePath 'b520')
+    $files = @(1..3 | %{ $name = RandomString; RandomString > (Join-Path $directory $name); $name } )
+
+    '`n`n' > (Join-Path $directory '.backupignore')
+
+    RunBackup
+
+    $log = ReadLogFile
+    $files | %{
+        if (-not ($log | Select-String $_)) {
+            "file was ignored: '$_'"
+        }
+    }
+}
+
 
 Test '2685 backupignore single file, ignore from the same directory' {
     
@@ -454,6 +503,12 @@ Test '0270 backupignore "not" pattern' {
 }
 
 Test "a53a backupignore 'this directory'"{
+    'not implemented'
+}
+
+Test "a476 file has to be named '.backupignore' exactly"{
+    'test' > (Join-Path $global:Context.TestSourcePath 'test.backupignore')
+    
     'not implemented'
 }
 
