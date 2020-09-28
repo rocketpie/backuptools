@@ -27,7 +27,7 @@ Param(
     $Confirm
 )
 
-if($PSBoundParameters['Debug']){
+if ($PSBoundParameters['Debug']) {
     $DebugPreference = 'Continue'
 }
     
@@ -42,7 +42,7 @@ function EnsureDirectory($filePath) {
 
 # ~ToString(): convert value into human readable, log-printable (one-line) string
 function Print($value) {
-    $value.ToString() # hack this for now...
+    $value | Out-string  # hack this for now...
 }
 
 # debugging: print variable name with it's value
@@ -56,14 +56,43 @@ function DebugOutput($name, $value) {
     Write-Debug "$($name.PadRight(18)): $(Print $value)"    
 }
 
+class MatchResult {
+    MatchResult($isMatchValue, $newIndexValue) {
+        $this.IsMatch = $isMatchValue
+        $this.NewIndex = $newIndexValue
+    }
+
+    [bool]$IsMatch
+    [int]$NewIndex
+}
+
+function PatternMatch([string]$value, [string[]]$patterns, [int]$currentIndex) {        
+    while ($patterns.Count -gt $currentIndex) {
+        $pattern = $patterns[$currentIndex]
+        
+        if ($value.StartsWith($pattern)) {
+            return [MatchResult]::new($true, $currentIndex)
+        }
+        
+        if ($value.CompareTo($pattern) -lt 0) {
+            # need to advance $value, not $pattern
+            return [MatchResult]::new($false, $currentIndex)
+        }
+        else {
+            # test next $pattern
+            $currentIndex++                
+        }
+    }
+
+    # no more patterns to match against
+    return [MatchResult]::new($false, $currentIndex)
+}
+
 # Preparation ======================================================================================================
 # ==================================================================================================================
 
 $priorErrorCount = $Error.Count
 Write-Debug $MyInvocation.Line
-
-$scriptPath = Split-path $MyInvocation.MyCommand.Definition
-DebugVar 'scriptPath'
 
 $SourcePath = Resolve-Path $SourcePath
 DebugVar 'SourcePath'
@@ -105,22 +134,123 @@ DebugVar 'logFile'
 if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot write log file"; exit }
 
 
-function Main($scriptPath, $SourcePath, $latestDirPath, $logDirPath) {    
+function Main($SourcePath, $latestDirPath, $logDirPath) {    
     $deletedDirPath = Join-Path $logDirPath deleted
     $updatedDirPath = Join-Path $logDirPath updated
 
-    # Step 1: Determine changes ====================================================================================
-    # ==============================================================================================================    
-    $changes = &(join-path $scriptPath Compare-Directories.ps1) $SourcePath $latestDirPath
+
+    # Step 1: Determine ignore pattern =============================================================================
+    # ==============================================================================================================
+    $ignorePatterns = [System.Collections.Generic.List[string]]::new()
+    $notIgnorePatterns = [System.Collections.Generic.List[string]]::new()
+    $ignoreFiles = @(ls $SourcePath -Filter '.backupignore' -Recurse -File -Force) 
+    $ignoreFiles | % {
+        $patterns = @(gc $_)
+        if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot read ignore file $($_.FullName)"; exit }
+
+        # 'c:\source\subdir\.backupignore' => 'subdir\'
+        $fileRelativePath = $_.Fullname.SubString($SourcePath.Length + 1, ($_.Fullname.length - 1 - $SourcePath.Length - ('.backupignore'.Length)))
+        DebugVar parentPath
+            
+        $patterns | % {
+            if ($_.StartsWith('!')) {
+                # 'a\b\' '!file.txt' => 'a\b\file.txt'
+                $notIgnorePatterns.Add("$($fileRelativePath)$($_.Substring(1))") | Out-Null
+            }
+            else {
+                # 'a\b\' '\file.txt' => 'a\b\file.txt'
+                $ignorePatterns.Add("$($fileRelativePath)$($_)") | Out-Null
+            }
+        }
+    }
+    
+    $ignorePatterns = @( $ignorePatterns | sort -Unique )
+    $notIgnorePatterns = @( $notIgnorePatterns | sort -Unique )
+    "$($ignoreFiles.Count) ignore files"
+    $ignorePatterns | % {
+        "ignoring: '$_'"
+    }
+    $notIgnorePatterns | % {
+        "not-ignoring: '$_'"
+    }
+
+
+    # Step 2: Determine source state, honouring ignorePatterns =====================================================
+    # ==============================================================================================================
+    $rawSourceRelativeFilenames = @(ls $SourcePath -Recurse -File -Force | % { $_.FullName.Substring($SourceDir.FullName.Length + 1) } | sort)
+    if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot list source files"; exit }
+    
+    $sourceRelativeFilenames = [System.Collections.Generic.List[string]]::new(($rawSourceRelativeFilenames.Count / 4))
+    $sourceIdx = 0;
+    $ignoreIdx = 0;
+    $notIgnoreIdx = 0;
+    while (($rawSourceRelativeFilenames.Count -gt $sourceIdx) -and ($ignorePatterns.Count -gt $ignoreIdx)) {
+        $item = $rawSourceRelativeFilenames[$sourceIdx]
+
+        $ignoreResult = PatternMatch $item $ignorePatterns $ignoreIdx
+        $ignoreIdx = $ignoreResult.NewIndex 
+        
+        if (!$ignoreResult.IsMatch) {
+            $sourceRelativeFilenames.Add($item) # result.Add
+        }
+        else {            
+            # ignore. Except when a not-ignore pattern also matches
+            $notIgnoreResult = PatternMatch $item $notIgnorePatterns $notIgnoreIdx
+            $notIgnoreIdx = $notIgnoreResult.NewIndex
+            
+            if ($notIgnoreResult.IsMatch) {
+                $sourceRelativeFilenames.Add($item) # result.Add
+            }
+        }
+
+        $sourceIdx++
+    }
+    "ignored $($rawSourceRelativeFilenames.Count - $sourceRelativeFilenames.Count) files"
+    
+    # free some space
+    $rawSourceRelativeFilenames = $null
+
+
+    # Step 3: Determine target state ===============================================================================
+    # ==============================================================================================================
+    $latestBackupRelativeFilenames = @(ls $latestDirPath -Recurse -File -Force | % { $_.FullName.Substring($targetDir.FullName.Length + 1) } | sort)
+    if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot list target files"; exit }
+    "found $($latestBackupRelativeFilenames.Count) files already backed up"
+
+    # Step 4: Determine changes ===================================================================================
+    # ==============================================================================================================
+    $changes = &(join-path $PSScriptRoot Get-ListDiff.ps1) $sourceRelativeFilenames $latestBackupRelativeFilenames
+    if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot Get-ListDiff"; exit }
+    
+    # filter Update selection by actual file difference since last backup
+    $rawUpdateCount = $changes.Update.Count
+    $update = [System.Collections.Generic.List[string]]::new()
+    $changes.Update | % { 
+        $sourceFile = Get-Item (Join-Path $SourcePath $_) -Force
+        $targetFile = Get-Item (Join-Path $TargetPath $_) -Force
+        
+        if (($sourceFile.LastWriteTime -ne $targetFile.LastWriteTime) -or ($sourceFile.Length -ne $targetFile.Length)) {
+            $update.Add($_)
+        }
+    }    
+    $changes.Update = $update
+    if ($Error.Count -gt $priorErrorCount) { Write-Error "error filtering update selection"; exit }    
+    "skipped $($rawUpdateCount - $changes.Update.Count) unmodified files"    
+
+    # Step 5: (Report), Confirm ====================================================================================
+    # ==============================================================================================================
+
     "$($changes.Enter.Count) new files, $($changes.Update.Count) files changed, $($changes.Exit.Count) files deleted"
     if (-not $Confirm) {
         if ('y' -ne (Read-Host 'Sounds right? (y)').ToLower()) {
             $changes
             Exit;
         }   
-    }
+    }  
 
-    # step 2: Move all deleted files
+     
+    # Step 6: Ready, Set, GO! ======================================================================================
+    # ==============================================================================================================
     $changes.Exit | % { 
         "deleted: $_"
         
@@ -148,4 +278,4 @@ function Main($scriptPath, $SourcePath, $latestDirPath, $logDirPath) {
     }
 }
 
-Main $scriptPath $SourcePath $latestDirPath $logDirPath 2>&1 | % { $_ >> $logFile; $_ }
+Main $SourcePath $latestDirPath $logDirPath 2>&1 | % { $_ >> $logFile; $_ }
