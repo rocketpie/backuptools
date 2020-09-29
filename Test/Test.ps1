@@ -404,7 +404,7 @@ Test 'b520 empty line in .backupignore is ignored' {
     $directory = mkdir (Join-Path $global:Context.TestSourcePath 'b520')
     $files = @(1..3 | %{ $name = RandomString; RandomString > (Join-Path $directory $name); $name } )
 
-    '`n`n' > (Join-Path $directory '.backupignore')
+    "`n`n" > (Join-Path $directory '.backupignore')
 
     RunBackup
 
@@ -427,7 +427,7 @@ Test '2685 backupignore single file, ignore from the same directory' {
     RunBackup
 
     $log = ReadLogFile
-    if (($log | Select-String $filename)) {
+    if (($log | Select-String "new file: $filename")) {
         'new file is not being ignored'
     }
 
@@ -446,7 +446,7 @@ Test '2685 backupignore single file, ignore from root directory' {
     RunBackup
 
     $log = ReadLogFile
-    if (($log | Select-String $filename)) {
+    if (($log | Select-String "new file: $filename")) {
         'new file is not being ignored'
     }
 
