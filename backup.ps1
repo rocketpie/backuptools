@@ -145,12 +145,12 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
     $notIgnorePatterns = [System.Collections.Generic.List[string]]::new()
     $ignoreFiles = @(ls $SourcePath -Filter '.backupignore' -Recurse -File -Force) 
     $ignoreFiles | % {
-        $patterns = @(gc $_)
+        $patterns = @(gc $_.FullName)
         if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot read ignore file $($_.FullName)"; exit }
 
         # 'c:\source\subdir\.backupignore' => 'subdir\'
         $fileRelativePath = $_.Fullname.SubString($SourcePath.Length + 1, ($_.Fullname.length - 1 - $SourcePath.Length - ('.backupignore'.Length)))
-        DebugVar parentPath
+        DebugVar fileRelativePath
             
         $patterns | % {
             if ($_.StartsWith('!')) {
@@ -205,6 +205,13 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
 
         $sourceIdx++
     }
+    
+    # flush remainder
+    $remainingSourceItems = @($rawSourceRelativeFilenames[$sourceIdx..$rawSourceRelativeFilenames.Length])
+    $remainingSourceItems | %{
+        $sourceRelativeFilenames.Add($_)
+    }
+
     "ignored $($rawSourceRelativeFilenames.Count - $sourceRelativeFilenames.Count) files"
     
     # free some space
@@ -227,7 +234,7 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
     $update = [System.Collections.Generic.List[string]]::new()
     $changes.Both | % { 
         $sourceFile = Get-Item (Join-Path $SourcePath $_) -Force
-        $targetFile = Get-Item (Join-Path $TargetPath $_) -Force
+        $targetFile = Get-Item (Join-Path $latestDirPath $_) -Force
         
         if (($sourceFile.LastWriteTime -ne $targetFile.LastWriteTime) -or ($sourceFile.Length -ne $targetFile.Length)) {
             $update.Add($_)
