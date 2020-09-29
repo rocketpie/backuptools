@@ -5,12 +5,12 @@
 	.DESCRIPTION
         returns a ListDiff {            
             [int]Total
-            # items present in $Source but not $Target
-            [string[]]Enter
-            # items present in both $Source and $Target
-            [string[]]Update
-            # items only present $Target
-            [string[]]Exit
+            # items present in $Left but not $Right
+            [string[]]Left
+            # items present in both $Left and $Right
+            [string[]]Both
+            # items only present $Right
+            [string[]]Right
         }
     
     .NOTES
@@ -38,71 +38,70 @@
 
 
     .EXAMPLE
-        Get-ListDiff @('1', '2', '3') @('2', '3', '4')
-        => { Total:4, Enter:['4'], Update:['2','3'], Exit:['1'] }
+        Get-ListDiff -Left @('1', '2', '3') -Right @('2', '3', '4')
+        => { Left:['1'], Both:['2','3'], Right:['4'] }
 #>
 [CmdletBinding()]
 Param(	
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [string[]]
-    $Source,
+    $Left,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [string[]]
-    $Target
+    $Right
 )
 
 class ListDiff {
     ListDiff() {
-        $this.Enter = [System.Collections.Generic.List[string]]::new()
-        $this.Update = [System.Collections.Generic.List[string]]::new()
-        $this.Exit = [System.Collections.Generic.List[string]]::new()
+        $this.Left = [System.Collections.Generic.List[string]]::new()
+        $this.Both = [System.Collections.Generic.List[string]]::new()
+        $this.Right = [System.Collections.Generic.List[string]]::new()
     }
 
-    [int]$Total
-    [System.Collections.Generic.List[string]]$Enter
-    [System.Collections.Generic.List[string]]$Update
-    [System.Collections.Generic.List[string]]$Exit
+    [System.Collections.Generic.List[string]]$Left
+    [System.Collections.Generic.List[string]]$Both
+    [System.Collections.Generic.List[string]]$Right
 }
 
 $result = New-Object ListDiff
     
 # step through both sorted lists in sync, sorting mismatches on the go
-$sourceIdx = 0;
-$targetIdx = 0;
-$hasNext = ($Source.Length -gt 0) -and ($Target.Length -gt 0)   
-while ($hasNext) {
-    $sourceItem = $Source[$sourceIdx]
-    $targetItem = $Target[$targetIdx]
-    $compare = $sourceItem.CompareTo($targetItem)
+$leftIdx = 0;
+$rightIdx = 0;
+while (($left.Length -gt $leftIdx) -and ($Right.Length -gt $rightIdx)) {
+    $leftItem = $Left[$leftIdx]
+    $rightItem = $Right[$rightIdx]
+    $compare = $leftItem.CompareTo($rightItem)
 
     if ($compare -eq 0) { 
         # most common case: same 
-        $sourceIdx++;
-        $targetIdx++;
-        $result.Update.Add($sourceItem)
+        $leftIdx++;
+        $rightIdx++;
+        $result.Both.Add($leftItem)
     }
     elseif ($compare -gt 0) {
-        # 1 == 'b'.CompareTo('a') => source is ahead of target, indicating a file in target that's missing in source
-        $result.Exit.Add($targetItem)
-        $targetIdx++;
+        # 1 == 'b'.CompareTo('a') => left is ahead of right, indicating a file in right that's missing in left
+        $result.Right.Add($rightItem)
+        $rightIdx++;
     }
     else <# ($compare -lt 0) #> {
-        # -1 == 'a'.CompareTo('b') => source is behind on target, indicating an extra file in source
-        $result.Enter.Add($sourceItem)
-        $sourceIdx++;
+        # -1 == 'a'.CompareTo('b') => left is behind on right, indicating an extra file in left
+        $result.Left.Add($leftItem)
+        $leftIdx++;
     }
-        
-    $hasNext = ($Source.Length -gt $sourceIdx) -and ($Target.Length -gt $targetIdx)
 }
 
 # flush remainder
-$remainingSourceFiles = @($Source[$sourceIdx..$Source.Length])
-$result.Enter.AddRange($remainingSourceFiles)
+$remainingSourceItems = @($Left[$leftIdx..$Left.Length])
+$remainingSourceItems | %{
+    $result.Left.Add($_)
+}
     
-$remainingTargetFiles = @($Target[$targetIdx..$Target.Length])
-$result.Exit.AddRange($remainingTargetFiles)
+$remainingTargetItems = @($Right[$rightIdx..$Right.Length])
+$remainingTargetItems | %{
+    $result.Right.Add($_)
+}
 
 
-$result.Total = $result.Enter.Count + $result.Update.Count + $result.Exit.Count
 return $result

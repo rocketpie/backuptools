@@ -88,9 +88,16 @@ function RunBackup {
     $global:Context.CurrentLogDir = @(ls -Directory $global:Context.TestTargetPath | ? { $_.Name.EndsWith(".$($global:Context.BackupRuns)") })[0]
 }
 
-# return 
 function GetDiff {
-    & (Join-Path $global:Context.BackupScriptPath Compare-Directories.ps1) $global:Context.TestSourcePath (join-path $global:Context.TestTargetPath '_latest')
+    $sourcePath = $global:Context.TestSourcePath
+    $sourceFilenames = @(ls $sourcePath -Recurse -File -Force | % { $_.FullName.Substring($sourcePath.Length + 1) } | sort)
+    if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot list source files" }
+    
+    $latestDirPath = (join-path $global:Context.TestTargetPath '_latest')
+    $latestFilenames = @(ls $latestDirPath -Recurse -File -Force | % { $_.FullName.Substring($latestDirPath.Length + 1) } | sort)
+    if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot list target files" }
+
+    & (Join-Path $global:Context.BackupScriptPath Get-ListDiff.ps1) -Left $sourceFilenames -Right $latestFilenames
 }
 
 # interprets objects returned from tests as errors
@@ -181,7 +188,8 @@ Test '4033 run without backup dir existing should create backup dir, copy of sou
     if (-not (Test-Path (Join-Path $global:Context.TestTargetPath '_latest'))) { '_latest dir missing' }
     if (@(ls $global:Context.TestTargetPath -Recurse -File 'log.txt').Length -ne 1) { 'log file missing' }
     $diff = GetDiff
-    if ($diff.Total -gt 0) { '_latest is not a copy of source' }
+    $total = $diff.Left.Count + $diff.Both.count + $diff.Right.Count
+    if ($total -gt 0) { '_latest is not a copy of source' }
 }
 
 # ==================================================================================================================

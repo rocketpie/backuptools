@@ -177,7 +177,7 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
 
     # Step 2: Determine source state, honouring ignorePatterns =====================================================
     # ==============================================================================================================
-    $rawSourceRelativeFilenames = @(ls $SourcePath -Recurse -File -Force | % { $_.FullName.Substring($SourceDir.FullName.Length + 1) } | sort)
+    $rawSourceRelativeFilenames = @(ls $SourcePath -Recurse -File -Force | % { $_.FullName.Substring($SourcePath.Length + 1) } | sort)
     if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot list source files"; exit }
     
     $sourceRelativeFilenames = [System.Collections.Generic.List[string]]::new(($rawSourceRelativeFilenames.Count / 4))
@@ -213,19 +213,19 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
 
     # Step 3: Determine target state ===============================================================================
     # ==============================================================================================================
-    $latestBackupRelativeFilenames = @(ls $latestDirPath -Recurse -File -Force | % { $_.FullName.Substring($targetDir.FullName.Length + 1) } | sort)
+    $latestBackupRelativeFilenames = @(ls $latestDirPath -Recurse -File -Force | % { $_.FullName.Substring($latestDirPath.Length + 1) } | sort)
     if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot list target files"; exit }
     "found $($latestBackupRelativeFilenames.Count) files already backed up"
 
     # Step 4: Determine changes ===================================================================================
     # ==============================================================================================================
-    $changes = &(join-path $PSScriptRoot Get-ListDiff.ps1) $sourceRelativeFilenames $latestBackupRelativeFilenames
+    $changes = &(join-path $PSScriptRoot Get-ListDiff.ps1) -Left $sourceRelativeFilenames -Right $latestBackupRelativeFilenames
     if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot Get-ListDiff"; exit }
     
     # filter Update selection by actual file difference since last backup
-    $rawUpdateCount = $changes.Update.Count
+    $rawUpdateCount = $changes.Both.Count
     $update = [System.Collections.Generic.List[string]]::new()
-    $changes.Update | % { 
+    $changes.Both | % { 
         $sourceFile = Get-Item (Join-Path $SourcePath $_) -Force
         $targetFile = Get-Item (Join-Path $TargetPath $_) -Force
         
@@ -233,14 +233,14 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
             $update.Add($_)
         }
     }    
-    $changes.Update = $update
+    $changes.Both = $update
     if ($Error.Count -gt $priorErrorCount) { Write-Error "error filtering update selection"; exit }    
-    "skipped $($rawUpdateCount - $changes.Update.Count) unmodified files"    
+    "skipped $($rawUpdateCount - $changes.Both.Count) unmodified files"    
 
     # Step 5: (Report), Confirm ====================================================================================
     # ==============================================================================================================
 
-    "$($changes.Enter.Count) new files, $($changes.Update.Count) files changed, $($changes.Exit.Count) files deleted"
+    "$($changes.Left.Count) new files, $($changes.Both.Count) files changed, $($changes.Right.Count) files deleted"
     if (-not $Confirm) {
         if ('y' -ne (Read-Host 'Sounds right? (y)').ToLower()) {
             $changes
@@ -251,7 +251,7 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
      
     # Step 6: Ready, Set, GO! ======================================================================================
     # ==============================================================================================================
-    $changes.Exit | % { 
+    $changes.Right | % { 
         "deleted: $_"
         
         EnsureDirectory (Join-Path $deletedDirPath $_)
@@ -259,7 +259,7 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
     }
 
     # step 3: Move all updated files, back up new version
-    $changes.Update | % { 
+    $changes.Both | % { 
         "updated: $_"
         
         EnsureDirectory (Join-Path $updatedDirPath $_)
@@ -270,7 +270,7 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
     }
 
     # step 4: back up new files
-    $changes.Enter | % {
+    $changes.Left | % {
         "new file: $_"
 
         EnsureDirectory (Join-Path $latestDirPath $_)
