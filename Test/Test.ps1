@@ -17,7 +17,12 @@ param (
     # be careful: some tests require other tests to be run prior or fail otherwise
     [Parameter(Position = 0, Mandatory = $false)]
     [string]
-    $SpecificTest = ""
+    $SpecificTest = "", 
+
+    # cleanup test directories when tests are done
+    [Parameter()]
+    [switch]
+    $Clean
 )
 
 if($PSBoundParameters['Debug']){
@@ -25,7 +30,6 @@ if($PSBoundParameters['Debug']){
 }
 
 $Global:specificTest = $SpecificTest
-
 
 class TestContext {
     TestContext() {
@@ -53,6 +57,12 @@ $global:Context.TestScriptPath = Split-path $MyInvocation.MyCommand.Definition
 $global:Context.BackupScriptPath = Split-Path (Get-Command backup.ps1).Definition
 $global:Context.TestSourcePath = Join-Path $global:Context.TestScriptPath 'source'
 $global:Context.TestTargetPath = Join-Path $global:Context.TestScriptPath 'backups'
+
+if($Clean){
+    rm $global:Context.TestSourcePath -Recurse -Force -ErrorAction 'SilentlyContinue' | Out-Null 
+    rm $global:Context.TestTargetPath -Recurse -Force -ErrorAction 'SilentlyContinue' | Out-Null 
+    exit
+}
 
 # Functions ========================================================================================================
 # ==================================================================================================================
@@ -466,6 +476,29 @@ Test '545d backupignore sub directory' {
     $filename = Split-Path $file -Leaf
     $relativeDirectoryPath = $directory.Substring($global:Context.TestSourcePath.Length + 1)
     $relativeDirectoryPath > (Join-Path $global:Context.TestSourcePath '.backupignore')
+    
+    RunBackup
+
+    $log = ReadLogFile
+    if (($log | Select-String $filename)) {
+        'new file is not being ignored'
+    }
+
+    if (-not ($log | Select-String 'backupignore')) {
+        'backupignore file is being ignored'
+    }
+}
+
+Test '545d backupignore case insensitive' {    
+    # avoid trying to ignore the root directory, because it isn't really a subdirectory.
+    do {
+        $file = AddRandomFile
+        $directory = Split-Path $file
+    } while ($directory -eq $global:Context.TestSourcePath)
+
+    $filename = Split-Path $file -Leaf
+    $relativeDirectoryPath = $directory.Substring($global:Context.TestSourcePath.Length + 1)
+    $relativeDirectoryPath.ToUpper() > (Join-Path $global:Context.TestSourcePath '.backupignore')
     
     RunBackup
 
