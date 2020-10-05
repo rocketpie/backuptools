@@ -12,6 +12,9 @@ param (
     [ValidateSet('CreationTime', 'LastWriteTime')]
     $Property = 'LastWriteTime',
 
+    [ValidateSet('Year', 'Month', 'Day')]
+    $Selector = 'Month',
+
     [Parameter()]
     [switch]
     $WhatIf = $false
@@ -20,7 +23,23 @@ param (
 begin {
     $files = ls $origin -File
         
-    $files | % { Add-Member -InputObject $_ -Type NoteProperty -Name "TargetDirectory" -Value ("{0:d4}-{1:d2}" -f $_.$Property.Year, $_.$Property.Month) }
+    $valueFormatter = "";
+    switch ($Selector) {
+        'Year' {
+            $valueFormatter = "{0:d4}";
+          }
+        'Month' {
+            $valueFormatter = "{0:d4}-{1:d2}";
+         }
+        'Day' {
+            $valueFormatter = "{0:d4}-{1:d2}-{2:d2}";
+         }
+        Default { 
+            Write-Error "invalid -Selector '$Selector'"
+            exit
+        }
+    }
+    $files | % { Add-Member -InputObject $_ -Type NoteProperty -Name "TargetDirectory" -Value ($valueFormatter -f $_.$Property.Year, $_.$Property.Month, $_.$Property.Day) }
         
     if ($WhatIf) {
         $files | % { "$($_.Name) => $($_.TargetDirectory)" }        
