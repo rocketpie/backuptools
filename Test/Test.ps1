@@ -72,7 +72,7 @@ function ResetSandbox {
     $global:Context.CurrentLogDir = $null
     
     # re setup source dirs
-    rm $global:Context.TestSourcePath -Recurse -Force
+    rm $global:Context.TestSourcePath -Recurse -Force -ErrorAction 'SilentlyContinue'
     mkdir $global:Context.TestSourcePath | Out-Null
     mkdir (Join-Path $global:Context.TestSourcePath 'a') | Out-Null
     mkdir (Join-Path $global:Context.TestSourcePath 'a\a') | Out-Null
