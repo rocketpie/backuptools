@@ -151,7 +151,9 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
         # 'c:\source\subdir\.backupignore' => 'subdir\'
         $fileRelativePath = $_.Fullname.SubString($SourcePath.Length + 1, ($_.Fullname.length - 1 - $SourcePath.Length - ('.backupignore'.Length)))
         DebugVar fileRelativePath
-            
+        
+        $patterns = @($patterns | % { $_.Trim() } | ?{ $_.Length -gt 0 })
+
         $patterns | % {
             if ($_.StartsWith('!')) {
                 # 'a\b\' '!file.txt' => 'a\b\file.txt'
