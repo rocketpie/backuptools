@@ -22,10 +22,15 @@ param (
     # cleanup test directories when tests are done
     [Parameter()]
     [switch]
-    $Clean
+    $Clean,
+
+    # reset test directories for test debugging
+    [Parameter()]
+    [switch]
+    $Reset
 )
 
-if($PSBoundParameters['Debug']){
+if ($PSBoundParameters['Debug']) {
     $DebugPreference = 'Continue'
 }
 
@@ -58,11 +63,6 @@ $global:Context.BackupScriptPath = Split-Path (Get-Command backup.ps1).Definitio
 $global:Context.TestSourcePath = Join-Path $global:Context.TestScriptPath 'source'
 $global:Context.TestTargetPath = Join-Path $global:Context.TestScriptPath 'backups'
 
-if($Clean){
-    rm $global:Context.TestSourcePath -Recurse -Force -ErrorAction 'SilentlyContinue' | Out-Null 
-    rm $global:Context.TestTargetPath -Recurse -Force -ErrorAction 'SilentlyContinue' | Out-Null 
-    exit
-}
 
 # Functions ========================================================================================================
 # ==================================================================================================================
@@ -72,7 +72,7 @@ function ResetSandbox {
     $global:Context.CurrentLogDir = $null
     
     # re setup source dirs
-    rm $global:Context.TestSourcePath -Recurse -Force -ErrorAction 'SilentlyContinue'
+    rm $global:Context.TestSourcePath -Recurse -Force -ErrorAction 'SilentlyContinue' | Out-Null
     mkdir $global:Context.TestSourcePath | Out-Null
     mkdir (Join-Path $global:Context.TestSourcePath 'a') | Out-Null
     mkdir (Join-Path $global:Context.TestSourcePath 'a\a') | Out-Null
@@ -91,9 +91,22 @@ function ResetSandbox {
     rm $global:Context.TestTargetPath -Recurse -Force -ErrorAction 'SilentlyContinue' | Out-Null 
 }
 
+
+if ($Clean -or $Reset) {
+    rm $global:Context.TestSourcePath -Recurse -Force -ErrorAction 'SilentlyContinue' | Out-Null 
+    rm $global:Context.TestTargetPath -Recurse -Force -ErrorAction 'SilentlyContinue' | Out-Null 
+    
+    if($Reset) {
+        ResetSandbox
+    }
+    
+    exit
+}
+
+
 # silently executes backup .\source .\backups
 function RunBackup {
-    backup.ps1 $global:Context.TestSourcePath $global:Context.TestTargetPath -Confirm | Out-Null
+    backup.ps1 $global:Context.TestSourcePath $global:Context.TestTargetPath -Confirm -Debug:($DebugPreference -eq 'Continue') | Out-Null
     $global:Context.BackupRuns++
     $global:Context.CurrentLogDir = @(ls -Directory $global:Context.TestTargetPath | ? { $_.Name.EndsWith(".$($global:Context.BackupRuns)") })[0]
 }
@@ -371,9 +384,9 @@ Test 'd2d9 write-protected attribute is backed up' {
 
 Test '1fb6 after a few tests, multiple log directories were created' {
     
-    $logDirectories = @(ls $global:Context.TestTargetPath -Directory | ?{ $_.Name -match '^[\d\.-]+$' })
+    $logDirectories = @(ls $global:Context.TestTargetPath -Directory | ? { $_.Name -match '^[\d\.-]+$' })
 
-    if(-not $logDirectories.Length -gt 5){
+    if (-not $logDirectories.Length -gt 5) {
         'a little few backup log directories for the amount of tests that ran, dont you think?'   
     }    
 }
@@ -382,7 +395,7 @@ Test '9961 merged .backupignore content is reported in log' {
     $testContent = @( RandomString )
     $testContent > (Join-Path $global:Context.TestSourcePath '.backupignore')
 
-    1..4 | %{ 
+    1..4 | % { 
         $randomDir = Split-Path (RandomNewFilePath)
         $content = RandomString 
         $content >> (Join-Path $randomDir '.backupignore')
@@ -394,14 +407,14 @@ Test '9961 merged .backupignore content is reported in log' {
 
     $log = ReadLogFile
 
-    $newFiles = @($log | ?{ $_ -match '^new file:' })    
-    $newIgnoreFiles = @($newFiles | ?{$_ -match '^new file: ([\w\\]*)\.backupignore'})
+    $newFiles = @($log | ? { $_ -match '^new file:' })    
+    $newIgnoreFiles = @($newFiles | ? { $_ -match '^new file: ([\w\\]*)\.backupignore' })
 
-    if($newFiles.Count -gt $newIgnoreFiles.Count){
+    if ($newFiles.Count -gt $newIgnoreFiles.Count) {
         'actual files have been written, log content is unreliable for this test'        
     }
 
-    $testContent | %{
+    $testContent | % {
         if (-not ($log | Select-String $_)) {
             "ignore pattern not reported: '$_'"
         }
@@ -412,14 +425,14 @@ Test '9961 merged .backupignore content is reported in log' {
 Test 'b520 empty line in .backupignore is ignored' {
     
     $directory = mkdir (Join-Path $global:Context.TestSourcePath 'b520')
-    $files = @(1..3 | %{ $name = RandomString; RandomString > (Join-Path $directory $name); $name } )
+    $files = @(1..3 | % { $name = RandomString; RandomString > (Join-Path $directory $name); $name } )
 
     "`n`n" > (Join-Path $directory '.backupignore')
 
     RunBackup
 
     $log = ReadLogFile
-    $files | %{
+    $files | % {
         if (-not ($log | Select-String $_)) {
             "file was ignored: '$_'"
         }
@@ -521,7 +534,7 @@ Test '0270 backupignore "not" pattern' {
     } while ($directory -eq $global:Context.TestSourcePath)
 
 
-    $otherFiles = 1..10 | %{ $name = RandomString; RandomString > (Join-Path $directory $name); $name }
+    $otherFiles = 1..10 | % { $name = RandomString; RandomString > (Join-Path $directory $name); $name }
 
     $relativeDirectoryPath = $directory.Substring($global:Context.TestSourcePath.Length + 1)
     $relativeDirectoryPath >> (Join-Path $global:Context.TestSourcePath '.backupignore')
@@ -536,18 +549,18 @@ Test '0270 backupignore "not" pattern' {
         'important file being ignored'
     }
 
-    $otherFiles | %{
+    $otherFiles | % {
         if (($log | Select-String $_)) {
             'important file being ignored'
         }
     }
 }
 
-Test "a53a backupignore 'this directory'"{
+Test "a53a backupignore 'this directory'" {
     'not implemented'
 }
 
-Test "a476 file has to be named '.backupignore' exactly"{
+Test "a476 file has to be named '.backupignore' exactly" {
     'test' > (Join-Path $global:Context.TestSourcePath 'test.backupignore')
     
     'not implemented'
@@ -569,3 +582,50 @@ Test '12365 call backup source\ target\' {
     'not implemented'
 }
 
+##################################################################################
+# regressions
+##################################################################################
+
+Test 'reg01 path with brackets' {
+    $bracketdir = (Join-Path $global:Context.TestSourcePath 'name with [brackets]')
+    New-Item -ItemType Directory -Path $bracketdir
+    
+    $filename = "$(RandomString).txt"
+    [System.IO.File]::WriteAllText((Join-Path $bracketdir $filename), 'data')
+
+    # the first backup should copy the file into the backup
+    RunBackup
+    $log = ReadLogFile
+    if (-not ($log | Select-String $filename)) {
+        'test is broken'
+    }
+
+    # the second run should not mention the file, as it is already backed up
+    RunBackup
+
+    $log = ReadLogFile
+    if (($log | Select-String $filename)) {
+        'file was not backed up from folder with brackets'
+    }
+}
+
+Test 'reg02 .backupignore in root directory, when root dir ends with "\"' {
+    ResetSandbox
+    if (-not $global:Context.TestSourcePath.EndsWith('\')) {
+        $global:Context.TestSourcePath += '\'
+    } 
+
+    $file = AddRandomFile    
+    $filename = Split-Path $file -Leaf
+    $relativeFilename = $file.Fullname.Substring($global:Context.TestSourcePath.Length + 1)
+    $relativeFilename > (Join-Path $global:Context.TestSourcePath '.backupignore')
+
+    RunBackup
+
+    if (-not $global:Context.TestSourcePath.EndsWith('\')) {
+        'something reset TestSourcePath'    
+    }
+    else {
+        $global:Context.TestSourcePath = $global:Context.TestSourcePath.TrimEnd('\')
+    }
+}
