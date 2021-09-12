@@ -24,8 +24,17 @@ Param(
 
     [Parameter(Mandatory = $false)]
     [switch]
-    $Confirm
+    $Confirm,
+
+    [Parameter(Mandatory = $false)]
+    [string]
+    [ValidateSet('default', 'progress', 'data')]
+    $OutputBehaviour = 'default'
 )
+
+$global:OUTPUT_BEHAVIOUR_DEFAULT = 'default'
+$global:OUTPUT_BEHAVIOUR_PROGRESS = 'progress'
+$global:OUTPUT_BEHAVIOUR_DATA = 'data'
 
 if ($PSBoundParameters['Debug']) {
     $DebugPreference = 'Continue'
@@ -66,6 +75,7 @@ class MatchResult {
     [int]$NewIndex
 }
 
+# checks if an item matches an (ignore)pattern
 function PatternMatch([string]$value, [string[]]$patterns, [int]$currentIndex) {        
     while ($patterns.Count -gt $currentIndex) {
         $pattern = $patterns[$currentIndex]
@@ -94,6 +104,8 @@ function PatternMatch([string]$value, [string[]]$patterns, [int]$currentIndex) {
 $priorErrorCount = $Error.Count
 Write-Debug $MyInvocation.Line
 
+$SourcePath = $SourcePath.Replace('/', '\')
+if ($SourcePath.EndsWith('\')) { $SourcePath.TrimEnd('\') }
 $SourcePath = Resolve-Path $SourcePath
 DebugVar 'SourcePath'
 if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot find source directory '$SourcePath'"; exit }
@@ -147,12 +159,14 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
     $ignoreFiles | % {
         $patterns = @(gc $_.FullName)
         if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot read ignore file $($_.FullName)"; exit }
+        else { Write-Debug "reading ignore file $($_.FullName)..." }
 
         # 'c:\source\subdir\.backupignore' => 'subdir\'
-        $fileRelativePath = $_.Fullname.SubString($SourcePath.Length + 1, ($_.Fullname.length - 1 - $SourcePath.Length - ('.backupignore'.Length)))
+        # there's a bug here, when theres a .backupignore file in the root directory and the root directory ends with '\' (eg. backup c:\d\ <target> when there's a .backupignore file in c:\d\. backup c:\d <target> will work)
+        $fileRelativePath = $_.Fullname.SubString($SourcePath.Length + 1, ($_.Fullname.length -1 - $SourcePath.Length - ('.backupignore'.Length)))
         DebugVar fileRelativePath
         
-        $patterns = @($patterns | % { $_.Trim() } | ?{ $_.Length -gt 0 })
+        $patterns = @($patterns | % { $_.Trim() } | ? { $_.Length -gt 0 })
 
         $patterns | % {
             if ($_.StartsWith('!')) {
@@ -168,12 +182,14 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
     
     $ignorePatterns = @( $ignorePatterns | sort -Unique )
     $notIgnorePatterns = @( $notIgnorePatterns | sort -Unique )
-    "$($ignoreFiles.Count) ignore files"
-    $ignorePatterns | % {
-        "ignoring: '$_'"
-    }
-    $notIgnorePatterns | % {
-        "not-ignoring: '$_'"
+    if ($OutputBehaviour -eq $global:OUTPUT_BEHAVIOUR_DEFAULT) { 
+        "$($ignoreFiles.Count) ignore files"
+        $ignorePatterns | % {
+            "ignoring: '$_'"
+        }
+        $notIgnorePatterns | % {
+            "not-ignoring: '$_'"
+        }
     }
 
 
@@ -210,11 +226,13 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
     
     # flush remainder
     $remainingSourceItems = @($rawSourceRelativeFilenames[$sourceIdx..$rawSourceRelativeFilenames.Length])
-    $remainingSourceItems | %{
+    $remainingSourceItems | % {
         $sourceRelativeFilenames.Add($_)
     }
 
-    "ignored $($rawSourceRelativeFilenames.Count - $sourceRelativeFilenames.Count) files"
+    if ($OutputBehaviour -eq $global:OUTPUT_BEHAVIOUR_DEFAULT) {
+        "ignored $($rawSourceRelativeFilenames.Count - $sourceRelativeFilenames.Count) files"
+    }
     
     # free some space
     $rawSourceRelativeFilenames = $null
@@ -224,13 +242,20 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
     # ==============================================================================================================
     $latestBackupRelativeFilenames = @(ls $latestDirPath -Recurse -File -Force | % { $_.FullName.Substring($latestDirPath.Length + 1) } | sort)
     if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot list target files"; exit }
-    "found $($latestBackupRelativeFilenames.Count) files already backed up"
+    if ($OutputBehaviour -eq $global:OUTPUT_BEHAVIOUR_DEFAULT) {
+        "found $($latestBackupRelativeFilenames.Count) files already backed up"
+    }
 
     # Step 4: Determine changes ===================================================================================
     # ==============================================================================================================
     $changes = &(join-path $PSScriptRoot Get-ListDiff.ps1) -Left $sourceRelativeFilenames -Right $latestBackupRelativeFilenames
     if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot Get-ListDiff"; exit }
     
+    if ($OutputBehaviour -eq $global:OUTPUT_BEHAVIOUR_DATA) {
+        $changes
+        return
+    }
+
     # filter Update selection by actual file difference since last backup
     $rawUpdateCount = $changes.Both.Count
     $update = [System.Collections.Generic.List[string]]::new()
@@ -238,13 +263,18 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
         $sourceFile = Get-Item (Join-Path $SourcePath $_) -Force
         $targetFile = Get-Item (Join-Path $latestDirPath $_) -Force
         
-        if (($sourceFile.LastWriteTime -ne $targetFile.LastWriteTime) -or ($sourceFile.Length -ne $targetFile.Length)) {
+        $wtChanged = $sourceFile.LastWriteTime -ne $targetFile.LastWriteTime
+        $ltChanged = $sourceFile.Length -ne $targetFile.Length
+        if ($wtChanged -or $ltChanged) {
+            Write-Debug "update found: writeTime:$($sourceFile.LastWriteTime):vs:$($targetFile.LastWriteTime) ($($wtChanged)) length:$($sourceFile.Length):vs:$($targetFile.Length) ($($ltChanged))"
             $update.Add($_)
         }
     }    
     $changes.Both = $update
     if ($Error.Count -gt $priorErrorCount) { Write-Error "error filtering update selection"; exit }    
-    "skipped $($rawUpdateCount - $changes.Both.Count) unmodified files"    
+    if ($OutputBehaviour -eq $global:OUTPUT_BEHAVIOUR_DEFAULT) {
+        "skipped $($rawUpdateCount - $changes.Both.Count) unmodified files"    
+    }
 
     # Step 5: (Report), Confirm ====================================================================================
     # ==============================================================================================================
@@ -257,11 +287,15 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
         }   
     }  
 
+    #$total = $changes.Left.Count + $changes.Both.Count + $changes.Right.Count
+    #$progress = 0;    
      
     # Step 6: Ready, Set, GO! ======================================================================================
     # ==============================================================================================================
     $changes.Right | % { 
-        "deleted: $_"
+        if ($OutputBehaviour -eq $global:OUTPUT_BEHAVIOUR_DEFAULT) {
+            "deleted: $_"
+        }
         
         EnsureDirectory (Join-Path $deletedDirPath $_)
         mv (Join-Path $latestDirPath $_) (Join-Path $deletedDirPath $_) 
@@ -269,7 +303,9 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
 
     # step 3: Move all updated files, back up new version
     $changes.Both | % { 
-        "updated: $_"
+        if ($OutputBehaviour -eq $global:OUTPUT_BEHAVIOUR_DEFAULT) {
+            "updated: $_"
+        }
         
         EnsureDirectory (Join-Path $updatedDirPath $_)
         mv (Join-Path $latestDirPath $_) (Join-Path $updatedDirPath $_) 
@@ -280,11 +316,18 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
 
     # step 4: back up new files
     $changes.Left | % {
-        "new file: $_"
+        if ($OutputBehaviour -eq $global:OUTPUT_BEHAVIOUR_DEFAULT) {
+            "new file: $_"
+        }
 
         EnsureDirectory (Join-Path $latestDirPath $_)
         cp (Join-Path $SourcePath $_) (Join-Path $latestDirPath $_)
     }
 }
 
-Main $SourcePath $latestDirPath $logDirPath 2>&1 | % { $_ >> $logFile; $_ }
+if ($OutputBehaviour -eq $global:OUTPUT_BEHAVIOUR_DATA) {
+    Main $SourcePath $latestDirPath $logDirPath
+}
+else {
+    Main $SourcePath $latestDirPath $logDirPath 2>&1 | % { $_ >> $logFile; $_ }
+}
