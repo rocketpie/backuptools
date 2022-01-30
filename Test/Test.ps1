@@ -460,18 +460,21 @@ Test '2685 backupignore single file, ignore from the same directory' {
     }
 }
 
-Test '2685 backupignore single file, ignore from root directory' {
+Test '2685 backupignore files, ignore from root directory' {
     
-    $file = AddRandomFile    
-    $filename = Split-Path $file -Leaf
-    $relativeFilename = $file.Fullname.Substring($global:Context.TestSourcePath.Length + 1)
-    $relativeFilename > (Join-Path $global:Context.TestSourcePath '.backupignore')
+    $addedFiles = @(1..10 | % { AddRandomFile })
+    $addedFiles |%{
+        $relativeFilename = $_.Fullname.Substring($global:Context.TestSourcePath.Length + 1)
+        $relativeFilename >> (Join-Path $global:Context.TestSourcePath '.backupignore')
+    }
     
     RunBackup
-
+    
     $log = ReadLogFile
-    if (($log | Select-String "new file: $filename")) {
-        'new file is not being ignored'
+    foreach ($file in $addedFiles) {
+        if (($log | Select-String "new file:.+$($file.Name)")) {
+            "file '$($file.Name)' is not being ignored"
+        }
     }
 
     if (-not ($log | Select-String 'backupignore')) {
@@ -490,7 +493,7 @@ Test '545d backupignore sub directory' {
     $filename = Split-Path $file -Leaf
     $relativeDirectoryPath = $directory.Substring($global:Context.TestSourcePath.Length + 1)
     $relativeDirectoryPath > (Join-Path $global:Context.TestSourcePath '.backupignore')
-    
+
     RunBackup
 
     $log = ReadLogFile
