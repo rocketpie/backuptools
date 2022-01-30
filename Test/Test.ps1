@@ -106,6 +106,7 @@ if ($Clean -or $Reset) {
 
 # silently executes backup .\source .\backups
 function RunBackup {
+    Write-Debug "backup.ps1 '$($global:Context.TestSourcePath)' '$($global:Context.TestTargetPath)' -Confirm -Debug:$($DebugPreference -eq 'Continue') | Out-Null"
     backup.ps1 $global:Context.TestSourcePath $global:Context.TestTargetPath -Confirm -Debug:($DebugPreference -eq 'Continue') | Out-Null
     $global:Context.BackupRuns++
     $global:Context.CurrentLogDir = @(ls -Directory $global:Context.TestTargetPath | ? { $_.Name.EndsWith(".$($global:Context.BackupRuns)") })[0]
@@ -127,7 +128,7 @@ function GetDiff {
 function Test($name, $testScript) {
     if ($Global:specificTest) {
         if (-not ($name.startswith($Global:specificTest))) {
-            Write-Debug "Skipping $name"
+            Write-Verbose "Skipping $name"
             return
         }
     }
@@ -571,15 +572,89 @@ Test '3aa5 errors get logged' {
 }
 
 Test '1234 call backup source/ target/' {
-    'not implemented'
+    ResetSandbox
+
+    $originalSourcePath = $global:Context.TestSourcePath
+    $originalTargetPath = $global:Context.TestTargetPath
+
+    $bareSourcePath = $originalSourcePath.TrimEnd('/', '\')
+    $bareTargetPath = $originalTargetPath.TrimEnd('/', '\')
+    
+    $global:Context.TestSourcePath = "$($bareSourcePath)/"
+    $global:Context.TestTargetPath = "$($bareTargetPath)/"
+    
+    Write-Debug "TestSourcePath: '$($global:Context.TestSourcePath)'"
+    Write-Debug "TestTargetPath: '$($global:Context.TestTargetPath)'"
+
+    $file = AddRandomFile
+    $filename = Split-Path $file -Leaf
+    Write-Debug "created new file: '$($filename)'"
+
+    RunBackup
+
+    $log = ReadLogFile
+    if (-not ($log | Select-String $filename)) {
+        'new file is not backed up'
+    }
+
+    $global:Context.TestSourcePath = $originalSourcePath
+    $global:Context.TestTargetPath = $originalTargetPath
 }
 
 Test '1235 call backup source target' {
-    'not implemented'
+    $originalSourcePath = $global:Context.TestSourcePath
+    $originalTargetPath = $global:Context.TestTargetPath
+
+    $bareSourcePath = $originalSourcePath.TrimEnd('/', '\')
+    $bareTargetPath = $originalTargetPath.TrimEnd('/', '\')
+    
+    $global:Context.TestSourcePath = "$($bareSourcePath)"
+    $global:Context.TestTargetPath = "$($bareTargetPath)"
+    
+    Write-Debug "TestSourcePath: '$($global:Context.TestSourcePath)'"
+    Write-Debug "TestTargetPath: '$($global:Context.TestTargetPath)'"
+
+    $file = AddRandomFile
+    $filename = Split-Path $file -Leaf
+    Write-Debug "created new file: '$($filename)'"
+    
+    RunBackup
+
+    $log = ReadLogFile
+    if (-not ($log | Select-String $filename)) {
+        'new file is not backed up'
+    }
+
+    $global:Context.TestSourcePath = $originalSourcePath
+    $global:Context.TestTargetPath = $originalTargetPath
 }
 
 Test '12365 call backup source\ target\' {
-    'not implemented'
+    $originalSourcePath = $global:Context.TestSourcePath
+    $originalTargetPath = $global:Context.TestTargetPath
+
+    $bareSourcePath = $originalSourcePath.TrimEnd('/', '\')
+    $bareTargetPath = $originalTargetPath.TrimEnd('/', '\')
+    
+    $global:Context.TestSourcePath = "$($bareSourcePath)\"
+    $global:Context.TestTargetPath = "$($bareTargetPath)\"
+    
+    Write-Debug "TestSourcePath: '$($global:Context.TestSourcePath)'"
+    Write-Debug "TestTargetPath: '$($global:Context.TestTargetPath)'"
+
+    $file = AddRandomFile
+    $filename = Split-Path $file -Leaf
+    Write-Debug "created new file: '$($filename)'"
+    
+    RunBackup
+
+    $log = ReadLogFile
+    if (-not ($log | Select-String $filename)) {
+        'new file is not backed up'
+    }
+
+    $global:Context.TestSourcePath = $originalSourcePath
+    $global:Context.TestTargetPath = $originalTargetPath
 }
 
 ##################################################################################
@@ -588,8 +663,8 @@ Test '12365 call backup source\ target\' {
 
 Test 'reg01 path with brackets' {
     $bracketdir = (Join-Path $global:Context.TestSourcePath 'name with [brackets]')
-    New-Item -ItemType Directory -Path $bracketdir
-    
+    New-Item -ItemType Directory -Path $bracketdir | Out-Null
+
     $filename = "$(RandomString).txt"
     [System.IO.File]::WriteAllText((Join-Path $bracketdir $filename), 'data')
 
@@ -602,7 +677,6 @@ Test 'reg01 path with brackets' {
 
     # the second run should not mention the file, as it is already backed up
     RunBackup
-
     $log = ReadLogFile
     if (($log | Select-String $filename)) {
         'file was not backed up from folder with brackets'
@@ -611,9 +685,10 @@ Test 'reg01 path with brackets' {
 
 Test 'reg02 .backupignore in root directory, when root dir ends with "\"' {
     ResetSandbox
-    if (-not $global:Context.TestSourcePath.EndsWith('\')) {
-        $global:Context.TestSourcePath += '\'
-    } 
+    $originalSourcePath = $global:Context.TestSourcePath
+    $bareSourcePath = $originalSourcePath.TrimEnd('/', '\')
+
+    $global:Context.TestSourcePath = "$($bareSourcePath)\"
 
     $file = AddRandomFile    
     $filename = Split-Path $file -Leaf
@@ -626,6 +701,6 @@ Test 'reg02 .backupignore in root directory, when root dir ends with "\"' {
         'something reset TestSourcePath'    
     }
     else {
-        $global:Context.TestSourcePath = $global:Context.TestSourcePath.TrimEnd('\')
+        $global:Context.TestSourcePath = $originalSourcePath
     }
 }
