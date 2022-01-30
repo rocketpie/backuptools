@@ -163,7 +163,7 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
         
         # 'c:\source\subdir\.backupignore' => 'subdir\'
         # there's a bug here, when theres a .backupignore file in the root directory and the root directory ends with '\' (eg. backup c:\d\ <target> when there's a .backupignore file in c:\d\. backup c:\d <target> will work)
-        $ignoreFileRelativePath = (Split-Path $_.Fullname).SubString($SourcePath.Length)
+        $ignoreFileRelativePath = $_.Fullname.SubString($SourcePath.Length + 1, ($_.Fullname.length -1 - $SourcePath.Length - ('.backupignore'.Length)))
         DebugVar ignoreFileRelativePath
         
         $patterns = @(gc $_.FullName)
