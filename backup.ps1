@@ -77,8 +77,9 @@ class MatchResult {
 
 # checks if an item matches an (ignore)pattern
 function PatternMatch([string]$value, [string[]]$patterns, [int]$currentIndex) {        
+    $value = $value.ToLower()
     while ($patterns.Count -gt $currentIndex) {
-        $pattern = $patterns[$currentIndex]
+        $pattern = $patterns[$currentIndex].ToLower()
         
         if ($value.StartsWith($pattern)) {
             return [MatchResult]::new($true, $currentIndex)
@@ -102,10 +103,10 @@ function PatternMatch([string]$value, [string[]]$patterns, [int]$currentIndex) {
 # ==================================================================================================================
 
 $priorErrorCount = $Error.Count
-Write-Debug $MyInvocation.Line
 
+# Normalize SourcePath
 $SourcePath = $SourcePath.Replace('/', '\')
-if ($SourcePath.EndsWith('\')) { $SourcePath.TrimEnd('\') }
+$SourcePath = $SourcePath.TrimEnd('\') 
 $SourcePath = Resolve-Path $SourcePath
 DebugVar 'SourcePath'
 if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot find source directory '$SourcePath'"; exit }
@@ -157,25 +158,25 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
     $notIgnorePatterns = [System.Collections.Generic.List[string]]::new()
     $ignoreFiles = @(ls $SourcePath -Filter '.backupignore' -Recurse -File -Force) 
     $ignoreFiles | % {
-        $patterns = @(gc $_.FullName)
         if ($Error.Count -gt $priorErrorCount) { Write-Error "cannot read ignore file $($_.FullName)"; exit }
         else { Write-Debug "reading ignore file $($_.FullName)..." }
-
+        
         # 'c:\source\subdir\.backupignore' => 'subdir\'
         # there's a bug here, when theres a .backupignore file in the root directory and the root directory ends with '\' (eg. backup c:\d\ <target> when there's a .backupignore file in c:\d\. backup c:\d <target> will work)
-        $fileRelativePath = $_.Fullname.SubString($SourcePath.Length + 1, ($_.Fullname.length -1 - $SourcePath.Length - ('.backupignore'.Length)))
-        DebugVar fileRelativePath
+        $ignoreFileRelativePath = (Split-Path $_.Fullname).SubString($SourcePath.Length)
+        DebugVar ignoreFileRelativePath
         
+        $patterns = @(gc $_.FullName)
         $patterns = @($patterns | % { $_.Trim() } | ? { $_.Length -gt 0 })
 
         $patterns | % {
             if ($_.StartsWith('!')) {
                 # 'a\b\' '!file.txt' => 'a\b\file.txt'
-                $notIgnorePatterns.Add("$($fileRelativePath)$($_.Substring(1))") | Out-Null
+                $notIgnorePatterns.Add("$($ignoreFileRelativePath)$($_.Substring(1))") | Out-Null
             }
             else {
                 # 'a\b\' '\file.txt' => 'a\b\file.txt'
-                $ignorePatterns.Add("$($fileRelativePath)$($_)") | Out-Null
+                $ignorePatterns.Add("$($ignoreFileRelativePath)$($_)") | Out-Null
             }
         }
     }
@@ -298,7 +299,7 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
         }
         
         EnsureDirectory (Join-Path $deletedDirPath $_)
-        mv (Join-Path $latestDirPath $_) (Join-Path $deletedDirPath $_) 
+        mv -LiteralPath (Join-Path $latestDirPath $_) -Destination (Join-Path $deletedDirPath $_) 
     }
 
     # step 3: Move all updated files, back up new version
@@ -308,10 +309,10 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
         }
         
         EnsureDirectory (Join-Path $updatedDirPath $_)
-        mv (Join-Path $latestDirPath $_) (Join-Path $updatedDirPath $_) 
+        mv -LiteralPath (Join-Path $latestDirPath $_) -Destination (Join-Path $updatedDirPath $_) 
 
         EnsureDirectory (Join-Path $latestDirPath $_)
-        cp (Join-Path $SourcePath $_) (Join-Path $latestDirPath $_)
+        cp -LiteralPath (Join-Path $SourcePath $_) -Destination (Join-Path $latestDirPath $_)
     }
 
     # step 4: back up new files
@@ -321,7 +322,7 @@ function Main($SourcePath, $latestDirPath, $logDirPath) {
         }
 
         EnsureDirectory (Join-Path $latestDirPath $_)
-        cp (Join-Path $SourcePath $_) (Join-Path $latestDirPath $_)
+        cp -LiteralPath (Join-Path $SourcePath $_) -Destination (Join-Path $latestDirPath $_) 
     }
 }
 
