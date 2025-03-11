@@ -6,11 +6,11 @@ Param(
     [datetime[]]$DateList,
 
     # Policy to test all $Date's against.
-    # eg.: '8days, 5weeks, 2months, 1years' will keep:
-    # the latest date each for all of the last 8 days,
-    # the latest date each for all of the last five weeks,
-    # the latest date each for all of the last 2 months,
-    # the latest date of the last year,
+    # eg.: '3/1d, 2/7d, 4/1y' will keep:
+    # the latest three dates that are 1d apart,
+    # the latest two dates that are 7 days apart,
+    # the latest four dates that are 1 year apart
+    # valid identifiers are: (s)econds (h)ours (d)ays (w)eeks (y)ears
     [Parameter(Mandatory, ParameterSetName = 'default')]
     [string]$Policy,
 
@@ -27,30 +27,37 @@ if ($PSBoundParameters['Debug']) {
     $DebugPreference = 'Continue'
 }
 
-$VALID_RULE_NAMES = @('years', 'months', 'weeks', 'days')
-"instead, go with something like 2/365days as: store 2 backups with 365 days cooldown in between"
-
 # parse, sanity check policy
 $policies = [System.Collections.ArrayList]::new()
 $policyErrors = [System.Collections.ArrayList]::new()
 $policyTokens = @($Policy.Split(',') | ForEach-Object { $_.Trim() })
 foreach ($token in $policyTokens) {
-    $tokenFormat = [regex]::Match($token, '(\d*)(\D*)')
+    $tokenFormat = [regex]::Match($token, '(\d+)/(\d+)([shdwy])')
     if (-not $tokenFormat.Success) {
         $policyErrors.Add("unrecognized policy format '$($token)'") | Out-Null
         continue
     }
 
-    $quantifier = $tokenFormat.Groups[1].Value
-    $rule = $tokenFormat.Groups[2].Value
-    
-    if ($VALID_RULE_NAMES -notcontains $rule) {
-        $policyErrors.Add("unrecognized policy '$($token)'") | Out-Null
-        continue
+    $slotCount = $tokenFormat.Groups[1].Value
+    $quantifier = $tokenFormat.Groups[2].Value
+    $unit = $tokenFormat.Groups[3].Value
+  
+    switch ($unit) {
+        's' { $cooldown = [timespan]::FromSeconds($quantifier) }
+        'h' { $cooldown = [timespan]::FromHours($quantifier) }
+        'd' { $cooldown = [timespan]::FromDays($quantifier) }
+        'w' { $cooldown = [timespan]::FromDays(7 * $quantifier) }
+        'y' { $cooldown = [timespan]::FromDays(365 * $quantifier) }
     }
 
-    # todo: re'name' to cooldown
-    $policies.Add(@{ 'name' = $rule; 'slots' = [Nullable[datetime][]]::new([int]$quantifier) }) | Out-Null
+    $policies.Add(
+        @{ 
+            'name'     = $token; 
+            'slots'    = $slotCount
+            'cooldown' = $cooldown
+            'queue'    = [System.Collections.Queue]::new()
+        }
+    ) | Out-Null
 }
 
 if ($policyErrors.Count -gt 0) {
@@ -58,29 +65,51 @@ if ($policyErrors.Count -gt 0) {
     return
 }
 
+function AddNext($Policy, $Date) {
+    $latestItem = $Policy.queue | Sort-Object | Select-Object -First 1
+    
+    if (($null -eq $latestItem) -or ($Date -gt ($latestItem.Add($Policy.cooldown)))) {
+        $Policy.queue.Enqueue($Date)
+        
+        if ($Policy.queue.Count -gt $Policy.slots) {
+            $expiredDate = $Policy.queue.Dequeue()
+            
+            Write-Debug "policy overflow: $($expiredDate.ToString('o'))"
+            return $expiredDate
+        }
+        
+        # date fits the policy
+        return $null
+    }
+    
+    Write-Debug "date isn't young enough to fit into this policy"
+    return $Date
+}
+
+$policies = @($policies | Sort-Object -Property 'cooldown' )
+
 $dateListSorted = [System.Collections.ArrayList]::new()
 $dateListSorted.AddRange(@($DateList | Sort-Object)) | Out-Null
 
-$policies = @($policies | Sort-Object { $VALID_RULE_NAMES.IndexOf($_) } )
-foreach ($date in $dateListSorted) {
+$expiredDates = [System.Collections.ArrayList]::new()
+foreach ($nextDate in $dateListSorted) {
     foreach ($policyItem in $policies) {
-        $latestPolicySlot = @($policyItem.slots | Where-Object { $null -ne $_ }| Sort-Object -Descending | Select-Object -First 1)
-        if($latestPolicySlot.Count -eq 0){
-        $policyItem.slots[0] = $date
-        }
-
-        if($date - $latestPolicySlot){}
-    }
-}
-
-
-
-
-$now = [datetime]::Now
-foreach ($policyItem in $policies) {
-    switch ($policyItem.name) {
-        'years' {
-            $now.AddYears(-$policyItem.quantity)
+        Write-Debug "fitting '$($nextDate.ToString('o'))' into '$($policyItem.name)'..."
+        $result = AddNext -policy $policyItem -date $nextDate
+        if ($null -eq $result) { 
+            Write-Debug "fits"
+            break;
+        }        
+        if ($nextDate -eq $result) {
+            Write-Debug "doesn't fit yet"
+            break;
         }
     }
+
+    if ($null -ne $result) {
+        Write-Debug "expiring '$($result.ToString('o'))'"
+        $expiredDates.Add($result) | Out-Null
+    }    
 }
+
+$expiredDates
