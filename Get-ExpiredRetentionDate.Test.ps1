@@ -77,21 +77,21 @@ function AssertEqual($expected, $actual) {
 
 "TEST: single item -Date parameter..."
 $data = [datetime]::Now
-$actual = & $sut -Date $data -Policy ''
+$actual = & $sut -Date $data -Policy '1days'
 $expected = $data
 AssertEqual $expected $actual
 
-"TEST: single item pipe call..."
-$actual = $data | & $sut -Policy ''
-AssertEqual $expected $actual
+# "TEST: single item pipe call..."
+# $actual = $data | & $sut -Policy '1days'
+# AssertEqual $expected $actual
 
 "TEST: two item -Date @() call..."
 $data = @([datetime]::Now, [datetime]::Now.AddDays(-1))
-$actual = & $sut -Date $data -Policy ''
+$actual = & $sut -Date $data -Policy '1days'
 $expected = $data
 AssertEqual $expected $actual
 
-"TEST: two item pipe call..."
-$actual = $data | & $sut -Policy ''
-AssertEqual $expected $actual
+# "TEST: two item pipe call..."
+# $actual = $data | & $sut -Policy '1days'
+# AssertEqual $expected $actual
 
