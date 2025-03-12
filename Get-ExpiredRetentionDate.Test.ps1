@@ -65,45 +65,66 @@ function AssertEqual($expected, $actual) {
         Write-Error "expected .Count: $($expected.Count) but got $($actual.Count)"
         return
     }
-    if ($expected.Count -eq 1) {
-        AssertEqualItem $expected $actual
-    }
-    else {
+
+    if ($expectedTypeName -eq 'System.Object[]') {
         for ($i = 0; $i -lt $expected.Count; $i++) {
             AssertEqualItem $expected[$i] $actual[$i]
         }
+    }
+    else {
+        AssertEqualItem $expected $actual
     }
 }
 
 "TEST: Now fits 1/1s policy..."
 $data = [datetime]::Now
-$actual = & $sut -Date $data -Policy '1/1s'
-$expected = $null
+$actual = @(& $sut -Date $data -Policy '1/1s')
+$expected = @()
 AssertEqual $expected $actual
 
 "TEST: Now fits 1/1m policy..."
 $data = [datetime]::Now
-$actual = & $sut -Date $data -Policy '1/1h'
-$expected = $null
+$actual = @(& $sut -Date $data -Policy '1/1h')
+$expected = @()
 AssertEqual $expected $actual
 
 "TEST: Now fits 1/1d policy..."
 $data = [datetime]::Now
-$actual = & $sut -Date $data -Policy '1/1d'
-$expected = $null
+$actual = @(& $sut -Date $data -Policy '1/1d')
+$expected = @()
 AssertEqual $expected $actual
 
 "TEST: Now fits 1/1y policy..."
 $data = [datetime]::Now
-$actual = & $sut -Date $data -Policy '1/1y'
-$expected = $null
+$actual = @(& $sut -Date $data -Policy '1/1y')
+$expected = @()
 AssertEqual $expected $actual
 
 "TEST: Now and -2d in 1/1d expires -2d..."
 $data = @([datetime]::Now, [datetime]::Now.AddDays(-2))
-$actual = & $sut -Date $data -Policy '1/1d'
-$expected = $data[1]
+$actual = @(& $sut -Date $data -Policy '1/1d')
+$expected = @($data[1])
 AssertEqual $expected $actual
+
+"TEST: Now and -2d in 1/1d,1/1w doesn't expire anything..."
+$data = @([datetime]::Now, [datetime]::Now.AddDays(-2))
+$actual = @(& $sut -Date $data -Policy '1/1d, 1/1w')
+$expected = @()
+AssertEqual $expected $actual
+
+"TEST: -1d and -30min in 2/1d keeps both, despite being less than 1d apart (23:30)..."
+$data = @([datetime]::Now.AddDays(-1), [datetime]::Now.AddMinutes(-30))
+$actual = @(& $sut -Date $data -Policy '2/1d')
+$expected = @()
+AssertEqual $expected $actual
+
+"TEST: -1d and -60min in 2/1d expires the latest, for being less than 1d apart (23:00)..."
+$data = @([datetime]::Now.AddDays(-1), [datetime]::Now.AddMinutes(-60))
+$actual = @(& $sut -Date $data -Policy '2/1d')
+$expected = @($data[1])
+AssertEqual $expected $actual
+
+
 
 # "TEST: two item pipe call..."
 # $actual = $data | & $sut -Policy '1days'

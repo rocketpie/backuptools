@@ -6,10 +6,11 @@ Param(
     [datetime[]]$DateList,
 
     # Policy to test all $Date's against.
-    # eg.: '3/1d, 2/7d, 4/1y' will keep:
-    # the latest three dates that are 1d apart,
-    # the latest two dates that are 7 days apart,
-    # the latest four dates that are 1 year apart
+    # eg.: '3/1d, 2/7d, 4/1y' will try to keep 9 dates:
+    # the latest three dates that are at least 1d apart,
+    # the latest two dates that are at least 7 days apart,
+    # the latest four dates that are at least 1 year apart
+    # (timing allows for 3% variation)
     # valid identifiers are: (s)econds (h)ours (d)ays (w)eeks (y)ears
     [Parameter(Mandatory, ParameterSetName = 'default')]
     [string]$Policy,
@@ -32,7 +33,8 @@ $policies = [System.Collections.ArrayList]::new()
 $policyErrors = [System.Collections.ArrayList]::new()
 $policyTokens = @($Policy.Split(',') | ForEach-Object { $_.Trim() })
 foreach ($token in $policyTokens) {
-    $tokenFormat = [regex]::Match($token, '(\d+)/(\d+)([shdwy])')
+    $token = $token.Trim()
+    $tokenFormat = [regex]::Match($token, '^(\d+)/(\d+)([shdwy])$')
     if (-not $tokenFormat.Success) {
         $policyErrors.Add("unrecognized policy format '$($token)'") | Out-Null
         continue
@@ -49,6 +51,9 @@ foreach ($token in $policyTokens) {
         'w' { $cooldown = [timespan]::FromDays(7 * $quantifier) }
         'y' { $cooldown = [timespan]::FromDays(365 * $quantifier) }
     }
+    
+    # reduce the cooldown by 3% to allow for some variation in backup timestamps
+    $cooldown = $cooldown.Add([timespan]::FromMilliseconds(-($cooldown.TotalMilliseconds * 0.03)))
 
     $policies.Add(
         @{ 
@@ -74,7 +79,7 @@ function AddNext($Policy, $Date) {
         if ($Policy.queue.Count -gt $Policy.slots) {
             $expiredDate = $Policy.queue.Dequeue()
             
-            Write-Debug "policy overflow: $($expiredDate.ToString('o'))"
+            Write-Debug "policy overflow: $($expiredDate.ToString('u'))"
             return $expiredDate
         }
         
@@ -94,7 +99,7 @@ $dateListSorted.AddRange(@($DateList | Sort-Object)) | Out-Null
 $expiredDates = [System.Collections.ArrayList]::new()
 foreach ($nextDate in $dateListSorted) {
     foreach ($policyItem in $policies) {
-        Write-Debug "fitting '$($nextDate.ToString('o'))' into '$($policyItem.name)'..."
+        Write-Debug "fitting '$($nextDate.ToString('u'))' into '$($policyItem.name)'..."
         $result = AddNext -policy $policyItem -date $nextDate
         if ($null -eq $result) { 
             Write-Debug "fits"
@@ -107,7 +112,7 @@ foreach ($nextDate in $dateListSorted) {
     }
 
     if ($null -ne $result) {
-        Write-Debug "expiring '$($result.ToString('o'))'"
+        Write-Debug "expiring '$($result.ToString('u'))'"
         $expiredDates.Add($result) | Out-Null
     }    
 }
