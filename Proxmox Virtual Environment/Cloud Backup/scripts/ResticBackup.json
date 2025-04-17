@@ -1,5 +1,13 @@
 {
     "ResticRepositoryPath": "/media/backups/restic-repository",
     "ResticPassword": "",
+    "ResticBackupOptions": [
+        "--skip-if-unchanged"
+    ],
+    "ResticForgetOptions": [
+        "--keep-last 2",
+        "--keep-weekly 2",
+        "--keep-monthly 2"
+    ],
     "BackupSuccessCommand": "RcloneSync.ps1"
 }

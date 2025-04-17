@@ -24,7 +24,7 @@ function TryRun {
     param (
         [string]$SUT,
         [string]$Path,
-        [switch]$ExpectError
+        [string]$ExpectedError
     )
     
     $caughtError = $false
@@ -33,14 +33,26 @@ function TryRun {
     }
     catch {
         $caughtError = $true
-        if ($ExpectError) {
-            "PASS: as expeted, error: $($_.Exception.Message)"
+        $errorText = $_.Exception.ToString()
+        if ([string]::IsNullOrWhiteSpace($ExpectedError)) {
+            "ERROR: $($errorText)"
             return
         }
-        "ERROR: $($_.Exception)"
+
+        if ($errorText -match $ExpectedError) {
+            "PASS: as expeted: $($_.Exception.Message)"
+            return
+        }
+        else {
+            "FAIL: unexpeted error: $($_.Exception)"
+        }
     }
 
-    if ($ExpectError -and (-not $caughtError)) {
+    if ([string]::IsNullOrWhiteSpace($ExpectedError)) {
+        return
+    }
+
+    if ((-not $caughtError)) {
         "FAIL: expected error, but didn't get one"
     }
 }
@@ -72,11 +84,16 @@ $testSourceName = 'app1'
 $testBackupsetPath = Join-Path $testBackupsetsDirectoryPath "$($testSourceName)-$(Get-date -AsUTC -Format 'yyyy-MM-ddTHH-mm')"
 New-Item -ItemType Directory $testBackupsetPath -ErrorAction SilentlyContinue | Out-Null
 
-TryRun -SUT $sut -Path $testBackupsetPath -ExpectError
-
+TryRun -SUT $sut -Path $testBackupsetPath -ExpectedError 'ResticRepositoryPath'
 "creating '$($resticRepoPath)'..."
 New-Item -ItemType Directory $resticRepoPath -ErrorAction SilentlyContinue | Out-Null
-TryRun -SUT $sut -Path $testBackupsetPath
+
+TryRun -SUT $sut -Path $testBackupsetPath -ExpectedError 'ResticPassword'
+"setting ResticPassword..."
+$config.ResticPassword = [guid]::NewGuid().ToString()
+$config | ConvertTo-Json | Set-Content -Path $testConfigFile
+
+TryRun -SUT $sut -Path $testBackupsetPath 
 
 Wait -Seconds 1
 "verify backupset has moved..."

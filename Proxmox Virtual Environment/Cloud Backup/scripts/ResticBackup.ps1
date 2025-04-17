@@ -12,7 +12,7 @@ if ($PSBoundParameters['Debug']) {
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
-"$($thisFileName) 1.1"
+"$($thisFileName) 1.2"
 
 function Main {
     Param(
@@ -22,12 +22,8 @@ function Main {
     # literal output ouf restic check when repo is ok.
     $RESTIC_OUTPUT_NO_ERRORS = 'no errors were found'
     $RESTIC_OUTPUT_MATCH_SUCCESS = 'snapshot (\w{8}) saved'
+    $RESTIC_OUTPUT_MATCH_FORGOT_SNAPSHOTS = 'remove \d+ snapshots:'
 
-    "testing command 'restic'..."
-    if ($null -eq (Get-Command 'restic' -ErrorAction SilentlyContinue)) {
-        Write-Error "[ERROR] cannot find command 'restic'"
-        return
-    }
 
     $config = ReadConfigFile
     if ($config.ResticRepositoryPath -match '^/|[A-Z]:[/\\]') {
@@ -46,21 +42,6 @@ function Main {
         return
     }
 
-    $env:RESTIC_REPOSITORY = $config.ResticRepositoryPath
-    $env:RESTIC_PASSWORD = $config.ResticPassword
-
-    "calling 'restic check'..."
-    $outputSaysNoErrorsFound = $false
-    & restic check | ForEach-Object { $_
-        if ("$($_)".ToLower().Trim() -eq $RESTIC_OUTPUT_NO_ERRORS) {
-            $outputSaysNoErrorsFound = $true 
-        }
-    }
-     
-    if (-not $outputSaysNoErrorsFound) {
-        Write-Error "ResticBackup.ps1: cannot continue unless 'restic check' returns '$($RESTIC_OUTPUT_NO_ERRORS)'"
-        return
-    }
     
     $backupsetName = Split-Path -Leaf $BackupsetPath
     $sourceNameMatch = [regex]::Match($backupsetName, '^(.*)-([\d-]{10})T([\d-]{5})$')
@@ -75,6 +56,31 @@ function Main {
         return
     }
 
+
+    "testing command 'restic'..."
+    if ($null -eq (Get-Command 'restic' -ErrorAction SilentlyContinue)) {
+        Write-Error "[ERROR] cannot find command 'restic'"
+        return
+    }
+
+    $env:RESTIC_REPOSITORY = $config.ResticRepositoryPath
+    $env:RESTIC_PASSWORD = $config.ResticPassword
+
+
+    "calling 'restic check'..."
+    $outputSaysNoErrorsFound = $false
+    & restic check | ForEach-Object { $_
+        if ("$($_)".ToLower().Trim() -eq $RESTIC_OUTPUT_NO_ERRORS) {
+            $outputSaysNoErrorsFound = $true 
+        }
+    }
+     
+    if (-not $outputSaysNoErrorsFound) {
+        Write-Error "ResticBackup.ps1: cannot continue unless 'restic check' returns '$($RESTIC_OUTPUT_NO_ERRORS)'"
+        return
+    }
+
+
     Move-Item $BackupsetPath $backupLocation
 
     "calling `"restic backup '$backupLocation'`"..."
@@ -83,8 +89,7 @@ function Main {
         if ([regex]::IsMatch("$_", $RESTIC_OUTPUT_MATCH_SUCCESS)) {
             $outputSaysSnapshotSaved = $true
         }
-    }
-    
+    }    
     if (-not $outputSaysSnapshotSaved) {
         Write-Error "ResticBackup.ps1: cannot continue unless 'restic backup' returns '$RESTIC_OUTPUT_MATCH_SUCCESS'"
         return
@@ -92,6 +97,27 @@ function Main {
 
     "removing '$backupLocation'..."
     Remove-Item -Path $backupLocation -Recurse -Force
+
+
+    if (($null -ne $config.ResticForgetOptions) -and ($config.ResticForgetOptions.Count -gt 0)) {
+        $resticParams = @(
+            'forget'
+        )
+        $resticParams += $config.ResticForgetOptions
+        "calling `"restic $((JoinParameterString $resticParams))`"..."
+        $outputSaysSnapshotsForgotten = $false
+        $forgottenSnapshotCount = 0
+        & restic @resticParams | ForEach-Object { $_
+            $outputMatch = [regex]::Match($_, $RESTIC_OUTPUT_MATCH_FORGOT_SNAPSHOTS)
+            if ($outputMatch.Success) {
+                $outputSaysSnapshotsForgotten = [int]::TryParse($outputMatch.Groups[1].Value, [ref]$forgottenSnapshotCount)
+            }
+        }
+        
+        if ((-not $outputSaysSnapshotsForgotten) -or ($forgottenSnapshotCount -lt 1)) {
+            Write-Warning "ResticBackup.ps1: looks like restic didn't remove anything (?)"
+        }
+    }
 
     "Done."
     
@@ -120,6 +146,28 @@ function RunBackupSuccessCommand {
     catch {
         "[ERROR] RunBackupSuccessCommand: $($_.Exception)"
     }
+}
+
+
+function JoinParameterString {
+    param (
+        [array]$Parameters
+    )
+    
+    $paramsText = [System.Text.StringBuilder]::new()
+    foreach ($param in $resticParams) {
+        if ($first) { $first = $false; }
+        else { $paramsText.Append(' ') }
+        
+        if ($param.ToString().Trim() -match '\s') { 
+            $paramsText.Append("'$($param)'")
+        }
+        else {
+            $paramsText.Append($param)
+        }
+    }
+
+    return $paramsText.ToString()
 }
 
 
