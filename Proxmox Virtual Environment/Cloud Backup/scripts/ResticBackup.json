@@ -1,0 +1,5 @@
+{
+    "ResticRepositoryPath": "/media/backups/restic-repository",
+    "ResticPassword": "",
+    "BackupSuccessCommand": "RcloneSync.ps1"
+}
