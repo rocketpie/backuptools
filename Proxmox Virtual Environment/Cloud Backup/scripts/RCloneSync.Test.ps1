@@ -71,34 +71,11 @@ $defaultConfigFile = Join-Path $PSScriptRoot $scriptName.Replace('.ps1', '.json'
 $testConfigFile = $sut.Replace('.ps1', '.json')
 "writing test config file '$($testConfigFile)'..."
 
-$resticRepoPath = Join-Path $testDirectory 'restic-repo'
-
 $config = Get-Content -Raw -Path $defaultConfigFile | ConvertFrom-Json
-$config.ResticRepositoryPath = $resticRepoPath
+$config.wat = "nope"
 $config | ConvertTo-Json | Set-Content -Path $testConfigFile
 
-$testBackupsetsDirectoryPath = Join-Path $testDirectory 'backupsets'
-New-Item -ItemType Directory $testBackupsetsDirectoryPath -ErrorAction SilentlyContinue | Out-Null
-
-$testSourceName = 'app1'
-$testBackupsetPath = Join-Path $testBackupsetsDirectoryPath "$($testSourceName)-$(Get-date -AsUTC -Format 'yyyy-MM-ddTHH-mm')"
-New-Item -ItemType Directory $testBackupsetPath -ErrorAction SilentlyContinue | Out-Null
-
-TryRun -SystemUnderTest { & $sut -BackupsetPath $testBackupsetPath } -ExpectedError 'ResticRepositoryPath'
-"creating '$($resticRepoPath)'..."
-New-Item -ItemType Directory $resticRepoPath -ErrorAction SilentlyContinue | Out-Null
-
-TryRun -SystemUnderTest { & $sut -BackupsetPath $testBackupsetPath } -ExpectedError 'ResticPassword'
-"setting ResticPassword..."
-$config.ResticPassword = [guid]::NewGuid().ToString()
-$config | ConvertTo-Json | Set-Content -Path $testConfigFile
-
-TryRun -SystemUnderTest { & $sut -BackupsetPath $testBackupsetPath }
-
-Wait -Seconds 1
-"verify backupset has moved..."
-"from '$(Split-Path -Leaf $testBackupsetPath)': $(PrintResult -TestResult (-not (Test-Path $testBackupsetPath)))"
-"to '$($testSourceName)': $(PrintResult -TestResult ((Test-Path (Join-Path $testBackupsetsDirectoryPath $testSourceName))))"
+TryRun -SystemUnderTest { & $sut } -ExpectedError 'none'
 
 "Done."
 Read-Host "press return to remove test directory..."
