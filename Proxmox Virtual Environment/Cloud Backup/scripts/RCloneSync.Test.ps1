@@ -12,7 +12,7 @@ function PrintResult {
     )
 
     if ($TestResult) { return "PASS" }
-    return "FAIL"
+    return "FAIL    <------- !!!"
 }
 
 function Wait([int]$Seconds) {

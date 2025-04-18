@@ -7,8 +7,10 @@ Param(
 $ErrorActionPreference = 'Stop'
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
+$thisFileVersion = "3.11"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
-"$($thisFileName) 3.9"
+Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
+"$($thisFileName) $($thisFileVersion)"
 
 function Main {
     $thisFileName = Get-Variable -Name "ThisFileName" -ValueOnly
@@ -24,7 +26,7 @@ function Main {
     while ($true) {
         $logFilePath = Join-Path $config.LogPath "$($thisFileName)-$(Get-Date -AsUTC -Format 'yyyy-MM-dd').log"
         if ($lastLogFilePath -ne $logFilePath) {
-            Add-LogTimeInfo -LogfilePath $logFilePath
+            Add-LogInitHeader -LogfilePath $logFilePath
             $lastLogFilePath = $logFilePath
         }
 
@@ -45,6 +47,11 @@ function RunLoop {
         Write-Debug "removing $($stoppedJobs.Count) stopped backupset assembly jobs..."
         foreach ($job in $stoppedJobs) {
             "$($job.State) '$($job.Name)'"
+            if ($job.State -eq 'Failed') {
+                "Job Failed. receiving Output:"
+                $job | Receive-Job | ForEach-Object { "> $($_)" } -join "`n"
+            }
+
             $job | Remove-Job
         }
 
@@ -52,7 +59,8 @@ function RunLoop {
         Get-Job | Where-Object { $_.State -eq 'Running' } | ForEach-Object {
             $activeJobs.Add( $_.Name, $_) | Out-Null
         }
-        Write-Debug "$($activeJobs.Count) active backupset assembly jobs..."
+        Write-Debug "$($activeJobs.Count) active backupset assembly jobs:"
+        Write-Debug "'$($activeJobs.Keys -join "', '")'"
 
         $sourceDirectories = Get-ChildItem $Config.SourcePath -Directory | Where-Object { -not $activeJobs.ContainsKey($_.FullName) }
         Write-Debug "looking into $($sourceDirectories.Count) inactive sources..."
@@ -65,7 +73,7 @@ function RunLoop {
 
             "detected items in source '$($sourceDir.Name)', starting backupset assembly job..."
             $thisScriptFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).ps1"
-            $job = Start-Job -ArgumentList @($thisScriptFile, $sourceDir.FullName, $Config) -Name $sourceDir.FullName -ScriptBlock {
+            Start-Job -ArgumentList @($thisScriptFile, $sourceDir.FullName, $Config) -Name $sourceDir.FullName -ScriptBlock {
                 Param($ThisScriptFile, $SourcePath, $Config)
                 . $ThisScriptFile
                 AssembleBackupsetLogged -SourcePath $SourcePath -Config $Config
@@ -96,7 +104,7 @@ function AssembleBackupsetLogged {
 
     $sourceName = Split-Path -Leaf -Path $SourcePath
     $logFilePath = Join-Path $Config.LogPath "backupset-$($sourceName)-$(Get-date -AsUTC -Format 'yyyy-MM-ddTHH-mm').log"
-    Add-LogTimeInfo -LogfilePath $logFilePath
+    Add-LogInitHeader -LogfilePath $logFilePath
     AssembleBackupset -SourcePath $SourcePath -Config $Config *>&1 | ForEach-Object { $_; Add-Content -Path $logFilePath -Encoding utf8NoBOM -Value "$(Get-Date -AsUTC -Format "HH:mm:ss") $_" }
 }
 
@@ -110,9 +118,11 @@ function AssembleBackupset {
     # immediate directory name below SourcePath
     $sourceName = Split-Path -Leaf -Path $SourcePath
     $backupsetName = "$($sourceName)-$(Get-date -AsUTC -Format 'yyyy-MM-ddTHH-mm')"
-    $backupsetPath = Join-Path $Config.BackupsetAssemblyPath $backupsetName
-
+        
     "[STARTED] AssembleBackupset '$($backupsetName)'"
+    $backupsetPath = Join-Path $Config.BackupsetAssemblyPath $backupsetName
+    "creating '$($backupsetPath)'..."
+    New-Item -ItemType Directory -Path $backupsetPath | Out-Null
 
     try {
         $TickInterval = [timespan]::Parse($Config.TickInterval)
@@ -172,9 +182,11 @@ function AssembleBackupset {
                 }
 
                 "didnt see '$($relativeFilePath)' change in the last $($fileDropWriteTimeout.TotalSeconds)s. moving to '$($backupsetFile)'..."
-                New-Item -ItemType Directory -Path (Split-Path $backupsetFile) | Out-Null
                 Move-Item -Path $dropFile.FullName -Destination $backupsetFile
-            (Get-FileHash -Path $backupsetFile -Algorithm SHA256).Hash | Set-Content -Path "$($backupsetFile).sha256"
+                $hashFilePath = "$($backupsetFile).sha256"
+                "calculating '$($hashFilePath)'..."
+                (Get-FileHash -Path $backupsetFile -Algorithm SHA256).Hash | Set-Content -Path $hashFilePath
+                "done."
 
                 $fileWatchList.Remove($dropFile.FullName) | Out-Null
             }
@@ -232,12 +244,15 @@ function RunBackupSetFinishedCommand {
 }
 
 
-function Add-LogTimeInfo {
+function Add-LogInitHeader {
     Param(
         [string]$LogfilePath
     )
+    $thisFileName = Get-Variable -Name "ThisFileName" -ValueOnly
+    $thisFileVersion = Get-Variable -Name "ThisFileVersion" -ValueOnly
 
-    Add-Content -Path $LogfilePath -Encoding utf8NoBOM -Value "log time $(Get-Date -AsUTC -Format "HH:mm:ss") UTC is $(Get-Date -Format "HH:mm:ss") local time"
+    Set-Content -Path $LogfilePath -Encoding utf8NoBOM -Value "$(Join-Path $PSScriptRoot $thisFileName).ps1 $($thisFileVersion)"
+    Add-Content -Path $LogfilePath -Value "log time $(Get-Date -AsUTC -Format "HH:mm:ss") UTC is $(Get-Date -Format "HH:mm:ss") local time"
 }
 
 

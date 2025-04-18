@@ -12,7 +12,7 @@ function PrintResult {
     )
 
     if ($TestResult) { return "PASS" }
-    return "FAIL"
+    return "FAIL    <------- !!!"
 }
 
 function Wait([int]$Seconds) {
@@ -97,8 +97,10 @@ TryRun -SystemUnderTest { & $sut -BackupsetPath $testBackupsetPath }
 
 Wait -Seconds 1
 "verify backupset has moved..."
-"from '$(Split-Path -Leaf $testBackupsetPath)': $(PrintResult -TestResult (-not (Test-Path $testBackupsetPath)))"
-"to '$($testSourceName)': $(PrintResult -TestResult ((Test-Path (Join-Path $testBackupsetsDirectoryPath $testSourceName))))"
+"from '$(Split-Path -Leaf $testBackupsetPath)':"
+PrintResult -TestResult (-not (Test-Path $testBackupsetPath))
+"to '$($testSourceName)':"
+PrintResult -TestResult ((Test-Path (Join-Path $testBackupsetsDirectoryPath $testSourceName)))
 
 "Done."
 Read-Host "press return to remove test directory..."

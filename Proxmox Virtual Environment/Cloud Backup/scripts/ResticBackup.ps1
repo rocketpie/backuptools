@@ -11,8 +11,10 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
+$thisFileVersion = "1.4"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
-"$($thisFileName) 1.3"
+Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
+"$($thisFileName) $($thisFileVersion)"
 
 function Main {
     Param(
