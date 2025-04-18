@@ -7,7 +7,7 @@ Param(
 $ErrorActionPreference = 'Stop'
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "3.11"
+$thisFileVersion = "3.12"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -52,6 +52,7 @@ function RunLoop {
                 $job | Receive-Job | ForEach-Object { "> $($_)" } -join "`n"
             }
 
+            "removing Job '$($job.Name)'..."            
             $job | Remove-Job
         }
 
@@ -77,7 +78,7 @@ function RunLoop {
                 Param($ThisScriptFile, $SourcePath, $Config)
                 . $ThisScriptFile
                 AssembleBackupsetLogged -SourcePath $SourcePath -Config $Config
-            }
+            } | Out-Null
         }
 
         $logfileRetentionDuration = [timespan]::Parse($Config.LogfileRetentionDuration)
@@ -251,7 +252,12 @@ function Add-LogInitHeader {
     $thisFileName = Get-Variable -Name "ThisFileName" -ValueOnly
     $thisFileVersion = Get-Variable -Name "ThisFileVersion" -ValueOnly
 
-    Set-Content -Path $LogfilePath -Encoding utf8NoBOM -Value "$(Join-Path $PSScriptRoot $thisFileName).ps1 $($thisFileVersion)"
+    if (Test-Path $LogfilePath) {
+        Add-Content -Path $LogfilePath -Encoding utf8NoBOM -Value "`n`n`n`n`n$(Join-Path $PSScriptRoot $thisFileName).ps1 $($thisFileVersion)"
+    }
+    else {
+        Set-Content -Path $LogfilePath -Encoding utf8NoBOM -Value "$(Join-Path $PSScriptRoot $thisFileName).ps1 $($thisFileVersion)"
+    }
     Add-Content -Path $LogfilePath -Value "log time $(Get-Date -AsUTC -Format "HH:mm:ss") UTC is $(Get-Date -Format "HH:mm:ss") local time"
 }
 
@@ -324,17 +330,6 @@ function New-FileWatch {
         LastWriteTime = $FileItem.LastWriteTime
         LastChanged   = (Get-Date -AsUTC)
     }
-}
-
-
-function Format-ByteSize {
-    param (
-        $Size
-    )
-
-    $magnitude = [System.Math]::Floor([System.Math]::Log($Size, 1024))
-    $readableSize = [System.Math]::Round(($Size / [System.Math]::Pow(1024, $magnitude)), 1)
-    return "$($readableSize)$(@('B', 'KB', 'MB', 'GB', 'TB', 'EB')[$magnitude])"
 }
 
 
