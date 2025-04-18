@@ -11,7 +11,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "1.4"
+$thisFileVersion = "1.5"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -110,7 +110,7 @@ function Main {
 
     if (($null -ne $config.ResticForgetOptions) -and ($config.ResticForgetOptions.Count -gt 0)) {
         $forgetParams = $config.ResticForgetOptions
-        "calling `"restic forget $((JoinParameterString $forgetParams))`"..."
+        "calling `"restic forget --prune $((JoinParameterString $forgetParams))`"..."
         $outputSaysSnapshotsForgotten = $false
         $forgottenSnapshotCount = 0
         & restic forget @forgetParams | ForEach-Object { $_

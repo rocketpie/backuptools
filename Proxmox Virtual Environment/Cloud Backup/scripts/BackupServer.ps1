@@ -7,7 +7,7 @@ Param(
 $ErrorActionPreference = 'Stop'
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "3.12"
+$thisFileVersion = "3.13"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -234,7 +234,7 @@ function RunBackupSetFinishedCommand {
             "Hint: use placeholder '{BackupSetPath}' in BackupSetFinishedCommand"
         }
 
-        "invoking '$($command)'..."
+        "invoking `"$($command)`"..."
         Invoke-Expression -Command $command
 
         "[COMPLETED] RunBackupSetFinishedCommand '$($BackupsetName)'"
