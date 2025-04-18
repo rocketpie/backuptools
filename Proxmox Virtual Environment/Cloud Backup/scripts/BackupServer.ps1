@@ -7,7 +7,7 @@ Param(
 $ErrorActionPreference = 'Stop'
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "3.13"
+$thisFileVersion = "3.15"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -49,7 +49,7 @@ function RunLoop {
             "$($job.State) '$($job.Name)'"
             if ($job.State -eq 'Failed') {
                 "Job Failed. receiving Output:"
-                $job | Receive-Job | ForEach-Object { "> $($_)" } -join "`n"
+                @($job | Receive-Job | ForEach-Object { "> $($_)" }) -join "`n"
             }
 
             "removing Job '$($job.Name)'..."            
@@ -330,6 +330,17 @@ function New-FileWatch {
         LastWriteTime = $FileItem.LastWriteTime
         LastChanged   = (Get-Date -AsUTC)
     }
+}
+
+
+function Format-ByteSize {
+    param (
+        $Size
+    )
+
+    $magnitude = [System.Math]::Floor([System.Math]::Log($Size, 1024))
+    $readableSize = [System.Math]::Round(($Size / [System.Math]::Pow(1024, $magnitude)), 1)
+    return "$($readableSize)$(@('B', 'KB', 'MB', 'GB', 'TB', 'EB')[$magnitude])"
 }
 
 
