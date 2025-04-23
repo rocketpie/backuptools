@@ -11,7 +11,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "1.5"
+$thisFileVersion = "1.6"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -24,7 +24,7 @@ function Main {
     # literal output ouf restic check when repo is ok.
     $RESTIC_OUTPUT_NO_ERRORS = 'no errors were found'
     $RESTIC_OUTPUT_MATCH_SUCCESS = 'snapshot (\w{8}) saved'
-    $RESTIC_OUTPUT_MATCH_FORGOT_SNAPSHOTS = 'remove \d+ snapshots:'
+    $RESTIC_OUTPUT_MATCH_FORGOT_SNAPSHOTS = 'remove (\d+) snapshots:'
 
 
     $config = ReadConfigFile
@@ -111,16 +111,15 @@ function Main {
     if (($null -ne $config.ResticForgetOptions) -and ($config.ResticForgetOptions.Count -gt 0)) {
         $forgetParams = $config.ResticForgetOptions
         "calling `"restic forget --prune $((JoinParameterString $forgetParams))`"..."
-        $outputSaysSnapshotsForgotten = $false
         $forgottenSnapshotCount = 0
         & restic forget @forgetParams | ForEach-Object { $_
             $outputMatch = [regex]::Match($_, $RESTIC_OUTPUT_MATCH_FORGOT_SNAPSHOTS)
             if ($outputMatch.Success) {
-                $outputSaysSnapshotsForgotten = [int]::TryParse($outputMatch.Groups[1].Value, [ref]$forgottenSnapshotCount)
+                [int]::TryParse($outputMatch.Groups[1].Value, [ref]$forgottenSnapshotCount) | Out-Nulls
             }
         }
 
-        if ((-not $outputSaysSnapshotsForgotten) -or ($forgottenSnapshotCount -lt 1)) {
+        if ($forgottenSnapshotCount -lt 1) {
             Write-Warning "ResticBackup.ps1: looks like restic didn't remove anything (?)"
         }
     }
