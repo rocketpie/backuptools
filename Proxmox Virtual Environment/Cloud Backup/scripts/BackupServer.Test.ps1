@@ -33,6 +33,9 @@ Copy-Item -path (Join-Path $PSScriptRoot $scriptName) -Destination $sut
 $testSourceDirectory = Join-Path $testDirectory 'source'
 New-Item -ItemType Directory $testSourceDirectory -ErrorAction SilentlyContinue | Out-Null
 
+$testSourceDirectory2 = Join-Path $testDirectory 'source2'
+New-Item -ItemType Directory $testSourceDirectory2 -ErrorAction SilentlyContinue | Out-Null
+
 $defaultConfigFile = Join-Path $PSScriptRoot $scriptName.Replace('.ps1', '.json')
 $testConfigFile = $sut.Replace('.ps1', '.json')
 "writing test config file '$($testConfigFile)'..."
@@ -61,8 +64,8 @@ Start-Job -ArgumentList @($sut, $DebugPreference) -ScriptBlock {
 
     Main
 } | Out-Null
-
 Wait -Seconds 1
+
 "assembly directory should be created:"
 PrintResult (Test-Path $testAssemblyDirectory)
 "target directory should be created:"
@@ -116,6 +119,60 @@ PrintResult ((Get-ChildItem $testDirectory -File -Filter "backupset-$($testAppNa
 
 "stopping all jobs..."
 Get-Job | Stop-Job -PassThru | Remove-Job
+
+
+"change to multi-source config..."
+$config.SourcePath = @($testSourceDirectory, $testSourceDirectory2)
+$config | ConvertTo-Json | Set-Content -Path $testConfigFile
+"restarting main job..."
+Start-Job -ArgumentList @($sut, $DebugPreference) -ScriptBlock {
+    Param($Sut, $DebugPref)
+    $DebugPreference = $DebugPref
+    . $Sut
+
+    Main
+} | Out-Null
+Wait -Seconds 1
+
+"creating test app directories..."
+$testAppName2 = 'test-app-name-2'
+$testAppName3 = 'test-app-name-3'
+$appdirectory2 = (Join-Path $testSourceDirectory $testAppName2)
+$appdirectory3 = (Join-Path $testSourceDirectory2 $testAppName3)
+New-Item -ItemType Directory -Path $appdirectory2 | Out-Null
+New-Item -ItemType Directory -Path $appdirectory3 | Out-Null
+
+$testFile2 = (Join-Path $appdirectory2 'test2.txt')
+$testFile3 = (Join-Path $appdirectory3 'test1.txt')
+"writing to files..."
+Set-Content -path $testFile2 -Value 'bla'
+Set-Content -path $testFile3 -Value 'bla'
+
+Wait -Seconds 1
+"backupsets should exist:"
+PrintResult (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName2)-*"))
+PrintResult (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName3)-*"))
+"logfile for backupsets should exist:"
+PrintResult ((Get-ChildItem $testDirectory -File -Filter "backupset-$($testAppName2)*.log").Count -gt 0)
+PrintResult ((Get-ChildItem $testDirectory -File -Filter "backupset-$($testAppName3)*.log").Count -gt 0)
+
+Wait -Seconds 5
+"files and their .sha256 sholud be present in a backupset folder:"
+PrintResult ((Get-ChildItem $testAssemblyDirectory -Recurse -File | Where-Object { $_.FullName -match $testAppName2 }).Count -eq 2)
+PrintResult ((Get-ChildItem $testAssemblyDirectory -Recurse -File | Where-Object { $_.FullName -match $testAppName3 }).Count -eq 2)
+
+Wait -Seconds 5
+"backup set should have been moved"
+"from assembly:"
+PrintResult (-not (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName2)-*")))
+PrintResult (-not (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName3)-*")))
+"to target:"
+PrintResult (Test-Path (Join-Path $testTargetDirectory "$($testAppName2)-*"))
+PrintResult (Test-Path (Join-Path $testTargetDirectory "$($testAppName3)-*"))
+
+"stopping all jobs..."
+Get-Job | Stop-Job -PassThru | Remove-Job
+
 
 "Done."
 Read-Host "press return to remove test directory..."

@@ -1,11 +1,13 @@
 {
     "LogPath": "/media/backups/log/",
-    "SourcePath": "/media/backups/drop/",
+    "SourcePath": [
+        "/media/backups/drop/"
+    ],
     "BackupsetAssemblyPath": "/media/backups/temp-set-assembly/",
     "BackupsetStorePath": "/media/backups/backupsets/",
     "TickInterval": "00:00:15",
     "SourceFileWriteTimeout": "00:00:30",
     "BackupsetAssemblyTimeout": "00:10:00",
     "LogfileRetentionDuration": "30:00:00:00",
-    "BackupSetFinishedCommand":"ResticBackup.ps1 -BackupSetPath '{BackupSetPath}'"
+    "BackupSetFinishedCommand": "ResticBackup.ps1 -BackupSetPath '{BackupSetPath}'"
 }

@@ -7,7 +7,7 @@ Param(
 $ErrorActionPreference = 'Stop'
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "3.15"
+$thisFileVersion = "3.16"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -16,7 +16,9 @@ function Main {
     $thisFileName = Get-Variable -Name "ThisFileName" -ValueOnly
     $config = ReadConfigFile
 
-    Test-ReadAccess -Path $config.SourcePath
+    foreach ($path in $config.SourcePath) {
+        Test-ReadAccess -Path $config.SourcePath
+    }
     Initialize-WritableDirectory -Path $config.LogPath
     Initialize-WritableDirectory -Path $config.BackupsetAssemblyPath
     Initialize-WritableDirectory -Path $config.BackupsetStorePath
@@ -63,7 +65,11 @@ function RunLoop {
         Write-Debug "$($activeJobs.Count) active backupset assembly jobs:"
         Write-Debug "'$($activeJobs.Keys -join "', '")'"
 
-        $sourceDirectories = Get-ChildItem $Config.SourcePath -Directory | Where-Object { -not $activeJobs.ContainsKey($_.FullName) }
+        $sourceDirectories = [System.Collections.ArrayList]::new()
+        foreach ($path in $Config.SourcePath) {
+            $addedCount = $sourceDirectories.AddRange(@(Get-ChildItem $path -Directory | Where-Object { -not $activeJobs.ContainsKey($_.FullName) })) 
+            Write-Debug "found $($addedCount) sources in '$($path)'"
+        }        
         Write-Debug "looking into $($sourceDirectories.Count) inactive sources..."
         foreach ($sourceDir in $sourceDirectories) {
             if ((Get-ChildItem -Path $sourceDir.FullName -Force).Count -lt 1) {
