@@ -7,7 +7,7 @@ Param(
 $ErrorActionPreference = 'Stop'
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "3.16"
+$thisFileVersion = "3.17"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -193,17 +193,16 @@ function AssembleBackupset {
                 $hashFilePath = "$($backupsetFile).sha256"
                 "calculating '$($hashFilePath)'..."
                 (Get-FileHash -Path $backupsetFile -Algorithm SHA256).Hash | Set-Content -Path $hashFilePath
-                "done."
-
+                
                 $fileWatchList.Remove($dropFile.FullName) | Out-Null
             }
-
+            
             if ($lastSeenAFile.Add($setAssemblyTimeout) -gt (Get-Date -AsUTC)) {
                 # files are still being processed
                 Start-Sleep -Duration $TickInterval
                 continue
             }
-
+            
             "no files have been processed for $($setAssemblyTimeout.TotalSeconds)s in '$($SourcePath)'"
             "moving backupset '$($backupsetName)' to '$($Config.BackupsetStorePath)'..."
             Move-Item -Path $backupsetPath $Config.BackupsetStorePath
