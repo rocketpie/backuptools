@@ -1,7 +1,14 @@
 #Requires -Version 7
 [CmdletBinding()]
 Param(
-    [string]$BackupsetPath
+    # read the configuration file and set the restic environment variables
+    [Parameter(Mandatory, ParameterSetName = "SetResticEnvironmentVariables")]
+    [switch]
+    $SetResticEnvironmentVariables,
+    
+    [Parameter(Mandatory, ParameterSetName = "RunBackupset")]
+    [string]
+    $BackupsetPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,7 +18,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "1.6"
+$thisFileVersion = "1.7"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -185,4 +192,15 @@ function ReadConfigFile {
     return $config
 }
 
-Main -BackupsetPath $BackupsetPath
+switch ($PSCmdlet.ParameterSetName) {
+    SetResticEnvironmentVariables { 
+        $config = ReadConfigFile
+        $env:RESTIC_REPOSITORY = $config.ResticRepositoryPath
+        $env:RESTIC_PASSWORD = $config.ResticPassword
+    }
+    
+    RunBackupset {
+        Main -BackupsetPath $BackupsetPath
+    }
+}
+
