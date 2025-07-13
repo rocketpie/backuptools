@@ -10,7 +10,7 @@
         "--keep-weekly",
         "2",
         "--keep-monthly",
-        "2"
+        "3"
     ],
     "BackupSuccessCommand": "RcloneSync.ps1"
 }
