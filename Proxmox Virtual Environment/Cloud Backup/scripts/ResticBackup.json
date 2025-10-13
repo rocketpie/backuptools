@@ -12,5 +12,5 @@
         "--keep-monthly",
         "3"
     ],
-    "BackupSuccessCommand": "RcloneSync.ps1"
+    "BackupSuccessCommand": null
 }

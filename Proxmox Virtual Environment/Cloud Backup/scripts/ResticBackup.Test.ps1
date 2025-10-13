@@ -75,6 +75,7 @@ $resticRepoPath = Join-Path $testDirectory 'restic-repo'
 
 $config = Get-Content -Raw -Path $defaultConfigFile | ConvertFrom-Json
 $config.ResticRepositoryPath = $resticRepoPath
+$config.BackupSuccessCommand = $null
 $config | ConvertTo-Json | Set-Content -Path $testConfigFile
 
 $testBackupsetsDirectoryPath = Join-Path $testDirectory 'backupsets'
@@ -99,8 +100,10 @@ Wait -Seconds 1
 "verify backupset has moved..."
 "from '$(Split-Path -Leaf $testBackupsetPath)':"
 PrintResult -TestResult (-not (Test-Path $testBackupsetPath))
-"to '$($testSourceName)':"
-PrintResult -TestResult ((Test-Path (Join-Path $testBackupsetsDirectoryPath $testSourceName)))
+"to '...$($testSourceName)'?: (TODO: test that restic took the snapshot)"
+PrintResult -TestResult ((Test-Path (Join-Path $resticRepoPath $testSourceName)))
+
+"TODO: test BackupSuccessCommand call"
 
 "Done."
 Read-Host "press return to remove test directory..."

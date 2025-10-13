@@ -11,6 +11,7 @@ Param(
     $BackupsetPath
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 if ($PSBoundParameters['Debug']) {
@@ -18,7 +19,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "1.7"
+$thisFileVersion = "1.8"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -78,7 +79,7 @@ function Main {
     # https://restic.readthedocs.io/en/stable/075_scripting.html
     "calling 'restic cat config'..."
     $outputSaysNoErrorsFound = $false
-    & restic cat config
+    restic cat config
     if ($LASTEXITCODE -ne 0) {
         Write-Error "ResticBackup.ps1: cannot continue unless 'restic cat config' exits with code 0"
         return
@@ -86,7 +87,8 @@ function Main {
 
     "calling 'restic check'..."
     $outputSaysNoErrorsFound = $false
-    & restic check | ForEach-Object { $_
+    "$(restic check)".Split([System.Environment]::NewLine) | ForEach-Object { 
+        $_
         if ("$($_)".ToLower().Trim() -eq $RESTIC_OUTPUT_NO_ERRORS) {
             $outputSaysNoErrorsFound = $true
         }
@@ -167,8 +169,9 @@ function JoinParameterString {
     )
 
     $paramsText = [System.Text.StringBuilder]::new()
-    foreach ($param in $resticParams) {
-        if ($first) { $first = $false; }
+    $first = $true
+    foreach ($param in $Parameters) {
+        if ($first) { $first = $false }
         else { $paramsText.Append(' ') }
 
         if ($param.ToString().Trim() -match '\s') {
