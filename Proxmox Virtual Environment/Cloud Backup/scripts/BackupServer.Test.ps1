@@ -1,5 +1,7 @@
 [CmdletBinding()]
 Param(
+    [switch]$Stop,
+    [switch]$Cleanup
 )
 
 if ($PSBoundParameters['Debug']) {
@@ -21,6 +23,19 @@ function Wait([int]$Seconds) {
 }
 
 $testDirectory = Join-Path $PSScriptRoot 'test'
+
+if ($Stop) {
+    Get-Job | Stop-Job -PassThru | Remove-Job    
+    return
+}
+if ($Cleanup) {
+    Remove-Item $testDirectory -Recurse -Force
+    return
+}
+
+"stopping all jobs..."
+Get-Job | Stop-Job -PassThru | Remove-Job
+
 "initializing test directory '$($testDirectory)'..."
 Remove-Item $testDirectory -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory $testDirectory -ErrorAction SilentlyContinue | Out-Null
@@ -30,11 +45,11 @@ $scriptName = $thisFileName.Replace('.Test', '')
 $sut = Join-Path $testDirectory $scriptName
 Copy-Item -path (Join-Path $PSScriptRoot $scriptName) -Destination $sut
 
-$testSourceDirectory = Join-Path $testDirectory 'source'
-New-Item -ItemType Directory $testSourceDirectory -ErrorAction SilentlyContinue | Out-Null
+$testDropDirectory = Join-Path $testDirectory 'drop'
+New-Item -ItemType Directory $testDropDirectory -ErrorAction SilentlyContinue | Out-Null
 
-$testSourceDirectory2 = Join-Path $testDirectory 'source2'
-New-Item -ItemType Directory $testSourceDirectory2 -ErrorAction SilentlyContinue | Out-Null
+$testDropDirectory2 = Join-Path $testDirectory 'drop2'
+New-Item -ItemType Directory $testDropDirectory2 -ErrorAction SilentlyContinue | Out-Null
 
 $defaultConfigFile = Join-Path $PSScriptRoot $scriptName.Replace('.ps1', '.json')
 $testConfigFile = $sut.Replace('.ps1', '.json')
@@ -45,8 +60,8 @@ $testTargetDirectory = Join-Path $testDirectory 'target'
 
 $config = Get-Content -Raw -Path $defaultConfigFile | ConvertFrom-Json
 $config.TickInterval = "00:00:01"
-$config.SourcePath = $testSourceDirectory
-$config.SourceFileWriteTimeout = "00:00:02"
+$config.DropPath = $testDropDirectory
+$config.DropFileWriteTimeout = "00:00:02"
 $config.BackupsetAssemblyPath = $testAssemblyDirectory
 $config.BackupsetAssemblyTimeout = "00:00:4"
 $config.BackupsetStorePath = $testTargetDirectory
@@ -75,7 +90,7 @@ PrintResult (Test-Path (Join-Path $testDirectory '*.log'))
 
 "creating test app directory..."
 $testAppName = 'test-app-name-1'
-$appdirectory = (Join-Path $testSourceDirectory $testAppName)
+$appdirectory = (Join-Path $testDropDirectory $testAppName)
 New-Item -ItemType Directory -Path $appdirectory | Out-Null
 
 $testFile1 = (Join-Path $appdirectory 'test1.txt')
@@ -121,8 +136,8 @@ PrintResult ((Get-ChildItem $testDirectory -File -Filter "backupset-$($testAppNa
 Get-Job | Stop-Job -PassThru | Remove-Job
 
 
-"change to multi-source config..."
-$config.SourcePath = @($testSourceDirectory, $testSourceDirectory2)
+"change to multi-drop config..."
+$config.DropPath = @($testDropDirectory, $testDropDirectory2)
 $config | ConvertTo-Json | Set-Content -Path $testConfigFile
 "restarting main job..."
 Start-Job -ArgumentList @($sut, $DebugPreference) -ScriptBlock {
@@ -137,8 +152,8 @@ Wait -Seconds 1
 "creating test app directories..."
 $testAppName2 = 'test-app-name-2'
 $testAppName3 = 'test-app-name-3'
-$appdirectory2 = (Join-Path $testSourceDirectory $testAppName2)
-$appdirectory3 = (Join-Path $testSourceDirectory2 $testAppName3)
+$appdirectory2 = (Join-Path $testDropDirectory $testAppName2)
+$appdirectory3 = (Join-Path $testDropDirectory2 $testAppName3)
 New-Item -ItemType Directory -Path $appdirectory2 | Out-Null
 New-Item -ItemType Directory -Path $appdirectory3 | Out-Null
 

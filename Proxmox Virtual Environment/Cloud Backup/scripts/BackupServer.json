@@ -1,12 +1,13 @@
 {
     "LogPath": "/media/backups/log/",
-    "SourcePath": [
-        "/media/backups/drop/"
+    "DropPath": [
+        "/media/backups/drop/",
+        "/media/backups/sftp-share/dockerhost1/drop/"
     ],
     "BackupsetAssemblyPath": "/media/backups/temp-set-assembly/",
     "BackupsetStorePath": "/media/backups/backupsets/",
     "TickInterval": "00:00:15",
-    "SourceFileWriteTimeout": "00:00:30",
+    "DropFileWriteTimeout": "00:00:30",
     "BackupsetAssemblyTimeout": "00:10:00",
     "LogfileRetentionDuration": "30:00:00:00",
     "BackupSetFinishedCommand": "ResticBackup.ps1 -BackupSetPath '{BackupSetPath}'"

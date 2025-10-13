@@ -4,10 +4,11 @@ Param(
     [switch]$Start
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "3.17"
+$thisFileVersion = "4.0"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -16,8 +17,8 @@ function Main {
     $thisFileName = Get-Variable -Name "ThisFileName" -ValueOnly
     $config = ReadConfigFile
 
-    foreach ($path in $config.SourcePath) {
-        Test-ReadAccess -Path $config.SourcePath
+    foreach ($path in $config.DropPath) {
+        Test-ReadAccess -Path $config.DropPath
     }
     Initialize-WritableDirectory -Path $config.LogPath
     Initialize-WritableDirectory -Path $config.BackupsetAssemblyPath
@@ -32,7 +33,7 @@ function Main {
             $lastLogFilePath = $logFilePath
         }
 
-        RunLoop -Config $config *>&1 | ForEach-Object { $_; Add-Content -Path $logFilePath -Encoding utf8NoBOM -Value "$(Get-Date -AsUTC -Format "HH:mm:ss") $_" }
+        RunLoop -Config $config *>&1 | ForEach-Object { $_; Add-Content -LiteralPath $logFilePath -Encoding utf8NoBOM -Value "$(Get-Date -AsUTC -Format "HH:mm:ss") $_" }
         Start-Sleep -Duration $TickInterval
     }
 }
@@ -54,47 +55,50 @@ function RunLoop {
                 @($job | Receive-Job | ForEach-Object { "> $($_)" }) -join "`n"
             }
 
-            "removing Job '$($job.Name)'..."            
+            "removing Job '$($job.Name)'..."
             $job | Remove-Job
         }
 
         $activeJobs = @{}
         Get-Job | Where-Object { $_.State -eq 'Running' } | ForEach-Object {
-            $activeJobs.Add( $_.Name, $_) | Out-Null
+            $activeJobs.Add($_.Name, $_) | Out-Null
         }
         Write-Debug "$($activeJobs.Count) active backupset assembly jobs:"
         Write-Debug "'$($activeJobs.Keys -join "', '")'"
 
         $sourceDirectories = [System.Collections.ArrayList]::new()
-        foreach ($path in $Config.SourcePath) {
-            $addedCount = $sourceDirectories.AddRange(@(Get-ChildItem $path -Directory | Where-Object { -not $activeJobs.ContainsKey($_.FullName) })) 
-            Write-Debug "found $($addedCount) sources in '$($path)'"
-        }        
-        Write-Debug "looking into $($sourceDirectories.Count) inactive sources..."
+        foreach ($path in $Config.DropPath) {
+            $droppedDirectories = @(Get-ChildItem $path -Directory -ErrorAction SilentlyContinue | Where-Object { -not $activeJobs.ContainsKey($_.FullName) })
+            if ($droppedDirectories.Count -gt 0) {
+                $sourceDirectories.AddRange($droppedDirectories)
+                Write-Debug "found $($droppedDirectories.Count) drop sources in '$($path)'"
+            }
+        }
+        Write-Debug "looking into $($sourceDirectories.Count) drop sources..."
         foreach ($sourceDir in $sourceDirectories) {
-            if ((Get-ChildItem -Path $sourceDir.FullName -Force).Count -lt 1) {
-                Write-Debug "source '$($sourceDir.Name)' is still inactive (empty)"
+            if (@(Get-ChildItem -LiteralPath $sourceDir.FullName -Force).Count -lt 1) {
+                Write-Debug "source '$($sourceDir.Name)' is still empty"
                 # nothing was dropped here
                 continue
             }
 
-            "detected items in source '$($sourceDir.Name)', starting backupset assembly job..."
+            "detected items in drop source '$($sourceDir.Name)', starting backupset assembly job..."
             $thisScriptFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).ps1"
             Start-Job -ArgumentList @($thisScriptFile, $sourceDir.FullName, $Config) -Name $sourceDir.FullName -ScriptBlock {
-                Param($ThisScriptFile, $SourcePath, $Config)
+                Param($ThisScriptFile, $DropPath, $Config)
                 . $ThisScriptFile
-                AssembleBackupsetLogged -SourcePath $SourcePath -Config $Config
+                AssembleBackupsetLogged -DropPath $DropPath -Config $Config
             } | Out-Null
         }
 
         $logfileRetentionDuration = [timespan]::Parse($Config.LogfileRetentionDuration)
         Write-Debug "logfileRetentionDuration: '$($logfileRetentionDuration)'"
 
-        $allLogfiles = Get-ChildItem -Path $Config.LogPath -File -Filter *.log
+        $allLogfiles = Get-ChildItem -LiteralPath $Config.LogPath -File -Filter *.log
         $expiredLogfiles = $allLogfiles | Where-Object { $_.LastWriteTime.Add($logfileRetentionDuration) -lt (Get-Date) }
         foreach ($expiredLogfile in $expiredLogfiles) {
             "removing expired logfile '$($expiredLogfile.Name)'..."
-            Remove-Item -Path $expiredLogfile.FullName
+            Remove-Item -LiteralPath $expiredLogfile.FullName
         }
     }
     catch {
@@ -105,27 +109,27 @@ function RunLoop {
 
 function AssembleBackupsetLogged {
     Param(
-        [string]$SourcePath,
+        [string]$DropPath,
         $Config
     )
 
-    $sourceName = Split-Path -Leaf -Path $SourcePath
+    $sourceName = Split-Path -Leaf -Path $DropPath
     $logFilePath = Join-Path $Config.LogPath "backupset-$($sourceName)-$(Get-date -AsUTC -Format 'yyyy-MM-ddTHH-mm').log"
     Add-LogInitHeader -LogfilePath $logFilePath
-    AssembleBackupset -SourcePath $SourcePath -Config $Config *>&1 | ForEach-Object { $_; Add-Content -Path $logFilePath -Encoding utf8NoBOM -Value "$(Get-Date -AsUTC -Format "HH:mm:ss") $_" }
+    AssembleBackupset -DropPath $DropPath -Config $Config *>&1 | ForEach-Object { $_; Add-Content -LiteralPath $logFilePath -Encoding utf8NoBOM -Value "$(Get-Date -AsUTC -Format "HH:mm:ss") $_" }
 }
 
 
 function AssembleBackupset {
     Param(
-        [string]$SourcePath,
+        [string]$DropPath,
         $Config
     )
 
-    # immediate directory name below SourcePath
-    $sourceName = Split-Path -Leaf -Path $SourcePath
+    # immediate directory name below DropPath
+    $sourceName = Split-Path -Leaf -Path $DropPath
     $backupsetName = "$($sourceName)-$(Get-date -AsUTC -Format 'yyyy-MM-ddTHH-mm')"
-        
+
     "[STARTED] AssembleBackupset '$($backupsetName)'"
     $backupsetPath = Join-Path $Config.BackupsetAssemblyPath $backupsetName
     "creating '$($backupsetPath)'..."
@@ -133,7 +137,7 @@ function AssembleBackupset {
 
     try {
         $TickInterval = [timespan]::Parse($Config.TickInterval)
-        $fileDropWriteTimeout = [timespan]::Parse($Config.SourceFileWriteTimeout)
+        $fileDropWriteTimeout = [timespan]::Parse($Config.DropFileWriteTimeout)
         $setAssemblyTimeout = [timespan]::Parse($Config.BackupSetAssemblyTimeout)
         Write-Debug "TickInterval: '$($TickInterval)'"
         Write-Debug "fileDropWriteTimeout: '$($fileDropWriteTimeout)'"
@@ -142,22 +146,22 @@ function AssembleBackupset {
         $lastSeenAFile = Get-Date -AsUTC
         $fileWatchList = @{}
         while ($true) {
-            $droppedFiles = @(Get-ChildItem $SourcePath -File -Recurse -Force)
+            $droppedFiles = @(Get-ChildItem $DropPath -File -Recurse -Force)
             Write-Debug "$($droppedFiles.Count) files in '$($sourceName)'"
             foreach ($dropFile in $droppedFiles) {
                 $lastSeenAFile = Get-Date -AsUTC
 
                 if (-not $fileWatchList.ContainsKey($dropFile.FullName)) {
-                    "start watching new file '$([System.IO.Path]::GetRelativePath($SourcePath, $dropFile.FullName))'"
+                    "start watching new file '$([System.IO.Path]::GetRelativePath($DropPath, $dropFile.FullName))'"
                     $fileWatchList.Add($dropFile.FullName, (New-FileWatch -FileItem $dropFile)) | Out-Null
                     continue
                 }
 
                 $watch = $fileWatchList[$dropFile.FullName]
 
-                if ($dropFile.Size -gt $watch.LastSize) {
-                    "'$($watch.File.Name)' grew to $(Format-ByteSize $dropFile.Size)"
-                    $watch.LastSize = $dropFile.Size
+                if ($dropFile.Length -gt $watch.LastLength) {
+                    "'$($watch.File.Name)' grew to $(Format-ByteSize $dropFile.Length)"
+                    $watch.LastLength = $dropFile.Length
                     $watch.LastWriteTime = $dropFile.LastWriteTime
                     $watch.LastChanged = (Get-Date -AsUTC)
                     continue
@@ -165,7 +169,7 @@ function AssembleBackupset {
 
                 if ($dropFile.LastWriteTime -ne $watch.LastWriteTime) {
                     "'$($watch.File.Name)' was modified since $($watch.LastWriteTime.ToString('HH:mm:ss'))"
-                    $watch.LastSize = $dropFile.Size
+                    $watch.LastLength = $dropFile.Length
                     $watch.LastWriteTime = $dropFile.LastWriteTime
                     $watch.LastChanged = (Get-Date -AsUTC)
                     continue
@@ -178,7 +182,7 @@ function AssembleBackupset {
                 }
 
                 Write-Debug "file unchanged, timeout elapsed. moving file..."
-                $relativeFilePath = [System.IO.Path]::GetRelativePath($SourcePath, $dropFile.FullName)
+                $relativeFilePath = [System.IO.Path]::GetRelativePath($DropPath, $dropFile.FullName)
                 $backupsetFile = Join-Path $backupsetPath $relativeFilePath
                 Write-Debug "relativeFilePath: '$($relativeFilePath)'"
                 Write-Debug "backupsetFile: '$($backupsetFile)'"
@@ -189,23 +193,23 @@ function AssembleBackupset {
                 }
 
                 "didnt see '$($relativeFilePath)' change in the last $($fileDropWriteTimeout.TotalSeconds)s. moving to '$($backupsetFile)'..."
-                Move-Item -Path $dropFile.FullName -Destination $backupsetFile
+                Move-Item -LiteralPath $dropFile.FullName -Destination $backupsetFile
                 $hashFilePath = "$($backupsetFile).sha256"
                 "calculating '$($hashFilePath)'..."
-                (Get-FileHash -Path $backupsetFile -Algorithm SHA256).Hash | Set-Content -Path $hashFilePath
-                
+                (Get-FileHash -LiteralPath $backupsetFile -Algorithm SHA256).Hash | Set-Content -LiteralPath $hashFilePath
+
                 $fileWatchList.Remove($dropFile.FullName) | Out-Null
             }
-            
+
             if ($lastSeenAFile.Add($setAssemblyTimeout) -gt (Get-Date -AsUTC)) {
                 # files are still being processed
                 Start-Sleep -Duration $TickInterval
                 continue
             }
-            
-            "no files have been processed for $($setAssemblyTimeout.TotalSeconds)s in '$($SourcePath)'"
+
+            "no files have been processed for $($setAssemblyTimeout.TotalSeconds)s in '$($DropPath)'"
             "moving backupset '$($backupsetName)' to '$($Config.BackupsetStorePath)'..."
-            Move-Item -Path $backupsetPath $Config.BackupsetStorePath
+            Move-Item -LiteralPath $backupsetPath $Config.BackupsetStorePath
             break
         }
 
@@ -258,12 +262,12 @@ function Add-LogInitHeader {
     $thisFileVersion = Get-Variable -Name "ThisFileVersion" -ValueOnly
 
     if (Test-Path $LogfilePath) {
-        Add-Content -Path $LogfilePath -Encoding utf8NoBOM -Value "`n`n`n`n`n$(Join-Path $PSScriptRoot $thisFileName).ps1 $($thisFileVersion)"
+        Add-Content -LiteralPath $LogfilePath -Encoding utf8NoBOM -Value "`n`n`n`n`n$(Join-Path $PSScriptRoot $thisFileName).ps1 $($thisFileVersion)"
     }
     else {
-        Set-Content -Path $LogfilePath -Encoding utf8NoBOM -Value "$(Join-Path $PSScriptRoot $thisFileName).ps1 $($thisFileVersion)"
+        Set-Content -LiteralPath $LogfilePath -Encoding utf8NoBOM -Value "$(Join-Path $PSScriptRoot $thisFileName).ps1 $($thisFileVersion)"
     }
-    Add-Content -Path $LogfilePath -Value "log time $(Get-Date -AsUTC -Format "HH:mm:ss") UTC is $(Get-Date -Format "HH:mm:ss") local time"
+    Add-Content -LiteralPath $LogfilePath -Value "log time $(Get-Date -AsUTC -Format "HH:mm:ss") UTC is $(Get-Date -Format "HH:mm:ss") local time"
 }
 
 
@@ -271,7 +275,7 @@ function Add-LogInitHeader {
 function ReadConfigFile {
     # Workaround: MyInvocation.MyCommand.Definition only contains the path to this file when it's not dot-loaded
     $configFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).json"
-    $config = Get-Content -Path $configFile -Raw | ConvertFrom-Json
+    $config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
     Write-Debug "using config from file '$($configFile)':`n$($config | ConvertTo-Json)"
     return $config
 }
@@ -282,14 +286,14 @@ function Test-ReadAccess {
         $Path
     )
     try {
-        if (-not (Test-path -Path $config.SourcePath -PathType Container)) {
-            Write-Error "'$($config.SourcePath)' does not exist"
+        if (-not (Test-path -LiteralPath $Path -PathType Container)) {
+            Write-Error "'$($Path)' does not exist"
             return
         }
-        Get-ChildItem -Recurse -Path $config.SourcePath -ErrorAction Stop
+        Get-ChildItem -Recurse -LiteralPath $Path -ErrorAction Stop
     }
     catch {
-        Write-Error "cannot read from '$($config.SourcePath)': $($_.Exception)"
+        Write-Error "cannot read from '$($Path)': $($_.Exception)"
     }
 }
 
@@ -300,11 +304,11 @@ function Initialize-WritableDirectory {
         [string]$Path
     )
 
-    if ((Test-path -Path $Path -PathType Leaf)) {
+    if ((Test-path -LiteralPath $Path -PathType Leaf)) {
         Write-Error "cannot create directory '$($Path)': a file with this path exists." -ErrorAction Stop
     }
     try {
-        if (-not (Test-path -Path $Path -PathType Container)) {
+        if (-not (Test-path -LiteralPath $Path -PathType Container)) {
             New-Item -ItemType Directory -Path $Path -Force -ErrorAction Stop | Out-Null
         }
     }
@@ -315,11 +319,11 @@ function Initialize-WritableDirectory {
     $testFile = (Join-Path $Path 'file-write-test-5636bb')
     try {
         New-Item -ItemType File -Path $testFile -ErrorAction Stop | Out-Null
-        Remove-Item -Path $testFile -ErrorAction SilentlyContinue | Out-Null
+        Remove-Item -LiteralPath $testFile -ErrorAction SilentlyContinue | Out-Null
     }
     catch {
         Write-Error "cannot write to directory '$($Path)': $($_.Exception)"
-        Remove-Item -Path $testFile -ErrorAction SilentlyContinue | Out-Null
+        Remove-Item -LiteralPath $testFile -ErrorAction SilentlyContinue | Out-Null
     }
 }
 
@@ -331,7 +335,7 @@ function New-FileWatch {
 
     return [PSCustomObject]@{
         File          = $FileItem
-        LastSize      = $FileItem.Size
+        LastLength    = $FileItem.Length
         LastWriteTime = $FileItem.LastWriteTime
         LastChanged   = (Get-Date -AsUTC)
     }
