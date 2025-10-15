@@ -60,7 +60,8 @@ $testTargetDirectory = Join-Path $testDirectory 'target'
 
 $config = Get-Content -Raw -Path $defaultConfigFile | ConvertFrom-Json
 $config.TickInterval = "00:00:01"
-$config.DropPath = $testDropDirectory
+$config.DropPath = @($testDropDirectory)
+$config.HostedSources = @()
 $config.DropFileWriteTimeout = "00:00:02"
 $config.BackupsetAssemblyPath = $testAssemblyDirectory
 $config.BackupsetAssemblyTimeout = "00:00:4"

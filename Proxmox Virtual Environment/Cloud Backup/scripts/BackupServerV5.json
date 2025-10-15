@@ -1,0 +1,26 @@
+{
+    "LogPath": "/media/backups/log/",
+    "DropSources": [
+        {
+            "Path": "/media/backups/drop/",
+            "FileWriteTimeout": "00:00:30",
+            "IdleTimeout": "00:10:00"
+        },
+        {
+            "Path": "/media/backups/sftp-share/dockerhost1/drop/",
+            "FileWriteTimeout": "00:00:30",
+            "IdleTimeout": "00:10:00"
+        }
+    ],
+    "HostedSources": [
+        {
+            "Path": "/media/backups/sftp-share/lc3win/",
+            "IdleTimeout": "00:10:00"
+        }
+    ],
+    "BackupsetAssemblyPath": "/media/backups/temp-set-assembly/",
+    "BackupsetStorePath": "/media/backups/backupsets/",
+    "TickInterval": "00:00:15",
+    "LogfileRetentionDuration": "30:00:00:00",
+    "BackupSetFinishedCommand": "ResticBackup.ps1 -BackupSetPath '{BackupSetPath}'"
+}
