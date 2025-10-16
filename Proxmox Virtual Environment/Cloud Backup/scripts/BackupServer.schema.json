@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BackupServer Configuration File",
+  "type": "object",
+  "properties": {
+    "LogPath": {
+      "type": "string",
+      "description": "Path where log files are written."
+    },
+    "DropPath": {
+      "type": "array",
+      "description": "List of directories where files are dropped.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "HostedSources": {
+      "type": "array",
+      "description": "directories where any process may store files persistently. when file changes are detected, after the IdleTimeout elapsed, a snapshots of the directory is taken",
+      "items": {
+        "type": "object",
+        "properties": {
+          "Path": {
+            "type": "string",
+            "description": "Source directory path."
+          },
+          "IdleTimeout": {
+            "type": "string",
+            "pattern": "^\\d{2}:\\d{2}:\\d{2}$",
+            "description": "Idle timeout duration in HH:MM:SS format."
+          }
+        },
+        "required": ["Path", "IdleTimeout"]
+      }
+    },
+    "BackupsetAssemblyPath": {
+      "type": "string",
+      "description": "Path where backup sets are assembled."
+    },
+    "BackupsetStorePath": {
+      "type": "string",
+      "description": "Path where backup sets are stored."
+    },
+    "TickInterval": {
+      "type": "string",
+      "pattern": "^\\d{2}:\\d{2}:\\d{2}$",
+      "description": "how often changes are evaluated, in HH:MM:SS format."
+    },
+    "LogfileRetentionDuration": {
+      "type": "string",
+      "pattern": "^\\d{2}:\\d{2}:\\d{2}:\\d{2}$",
+      "description": "Retention duration for log files in DD:HH:MM:SS format."
+    },
+    "BackupSetFinishedCommand": {
+      "type": "string",
+      "description": "Command to execute when a backupset has been completed."
+    },
+    "DropFileWriteTimeout": {
+      "type": "string",
+      "pattern": "^\\d{2}:\\d{2}:\\d{2}$",
+      "description": "Timeout for writing drop files in HH:MM:SS format."
+    },
+    "BackupsetAssemblyTimeout": {
+      "type": "string",
+      "pattern": "^\\d{2}:\\d{2}:\\d{2}$",
+      "description": "Timeout for backup set assembly in HH:MM:SS format."
+    }
+  },
+  "required": [
+    "LogPath",
+    "DropPath",
+    "HostedSources",
+    "BackupsetAssemblyPath",
+    "BackupsetStorePath",
+    "TickInterval",
+    "LogfileRetentionDuration",
+    "BackupSetFinishedCommand",
+    "DropFileWriteTimeout",
+    "BackupsetAssemblyTimeout"
+  ],
+  "additionalProperties": false
+}

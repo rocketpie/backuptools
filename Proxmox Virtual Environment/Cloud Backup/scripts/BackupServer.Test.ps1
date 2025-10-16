@@ -8,13 +8,28 @@ if ($PSBoundParameters['Debug']) {
     $DebugPreference = 'Continue'
 }
 
-function PrintResult {
+function AssertEqual {
     param (
-        [bool]$TestResult
+        $Expected,
+        $Actual
     )
+    
+    if ($Actual -isnot $Expected.GetType()) {
+        return "FAIL (expected [$($Expected.GetType().Name)] but got [$($Actual.GetType().Name)])   <---------------------- !!!!!"    
+    }
+    elseif ($Expected -ne $Actual) {
+        return "FAIL (expected '$($Expected)' but got '$($Actual)')     <---------------------- !!!!!"
+    }
+    
+    return "PASS"
+}
 
-    if ($TestResult) { return "PASS" }
-    return "FAIL    <------- !!!"
+
+function Test-LogfileMatch {
+    param ([string]$logPath, [string]$Pattern)
+    $logMatches = @(Select-String -Path (Join-Path $logPath "backupserver-*.log") -Pattern $Pattern)
+    Write-Debug "Test-LogfileMatch '$($Pattern)': $($logMatches.Count) hits"
+    return $logMatches.Count -gt 0
 }
 
 function Wait([int]$Seconds) {
@@ -45,11 +60,17 @@ $scriptName = $thisFileName.Replace('.Test', '')
 $sut = Join-Path $testDirectory $scriptName
 Copy-Item -path (Join-Path $PSScriptRoot $scriptName) -Destination $sut
 
+$schemaFilename = $thisFileName.Replace('.Test.ps1', '.schema.json')
+Copy-Item -path (Join-Path $PSScriptRoot $schemaFilename) -Destination (Join-Path $testDirectory $schemaFilename)
+
 $testDropDirectory = Join-Path $testDirectory 'drop'
 New-Item -ItemType Directory $testDropDirectory -ErrorAction SilentlyContinue | Out-Null
 
 $testDropDirectory2 = Join-Path $testDirectory 'drop2'
 New-Item -ItemType Directory $testDropDirectory2 -ErrorAction SilentlyContinue | Out-Null
+
+$testHostedDirectory = Join-Path $testDirectory 'host1'
+New-Item -ItemType Directory $testHostedDirectory -ErrorAction SilentlyContinue | Out-Null
 
 $defaultConfigFile = Join-Path $PSScriptRoot $scriptName.Replace('.ps1', '.json')
 $testConfigFile = $sut.Replace('.ps1', '.json')
@@ -61,13 +82,18 @@ $testTargetDirectory = Join-Path $testDirectory 'target'
 $config = Get-Content -Raw -Path $defaultConfigFile | ConvertFrom-Json
 $config.TickInterval = "00:00:01"
 $config.DropPath = @($testDropDirectory)
-$config.HostedSources = @()
+$config.HostedSources = @(
+    [PSCustomObject]@{
+        Path        = $testHostedDirectory
+        IdleTimeout = "00:10:00"
+    }
+)
 $config.DropFileWriteTimeout = "00:00:02"
 $config.BackupsetAssemblyPath = $testAssemblyDirectory
-$config.BackupsetAssemblyTimeout = "00:00:4"
+$config.BackupsetAssemblyTimeout = "00:00:04"
 $config.BackupsetStorePath = $testTargetDirectory
 $config.LogPath = $testDirectory
-$config.LogfileRetentionDuration = "00:00:03"
+$config.LogfileRetentionDuration = "00:00:00:03"
 $config.BackupSetFinishedCommand = "Set-Content -Path '{BackupSetPath}\finished.txt' -Value 'a36e26'"
 $config | ConvertTo-Json | Set-Content -Path $testConfigFile
 
@@ -83,11 +109,14 @@ Start-Job -ArgumentList @($sut, $DebugPreference) -ScriptBlock {
 Wait -Seconds 1
 
 "assembly directory should be created:"
-PrintResult (Test-Path $testAssemblyDirectory)
+AssertEqual $true (Test-Path $testAssemblyDirectory)
 "target directory should be created:"
-PrintResult (Test-Path $testTargetDirectory)
+AssertEqual $true (Test-Path $testTargetDirectory)
 "logfile should exist:"
-PrintResult (Test-Path (Join-Path $testDirectory '*.log'))
+AssertEqual $true (Test-Path (Join-Path $testDirectory '*.log'))
+"logfile should indicate directoryWatch started"
+AssertEqual $true (Test-LogfileMatch -logPath $testDirectory -Pattern "Start-DirectoryWatch.*?host1")
+
 
 "creating test app directory..."
 $testAppName = 'test-app-name-1'
@@ -100,11 +129,11 @@ $testFile2 = (Join-Path $appdirectory 'test2.txt')
 Set-Content -path $testFile1 -Value 'bla'
 Wait -Seconds 1
 "file should still be present:"
-PrintResult (Test-Path $testFile1)
+AssertEqual $true (Test-Path $testFile1)
 "backupset should exist:"
-PrintResult (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName)-*"))
+AssertEqual $true (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName)-*"))
 "logfile for backupset should exist:"
-PrintResult ((Get-ChildItem $testDirectory -File -Filter "backupset-$($testAppName)*.log").Count -gt 0)
+AssertEqual 1 (Get-ChildItem $testDirectory -File -Filter "backupset-$($testAppName)*.log").Count
 
 "writing to file 2..."
 Set-Content -path $testFile2 -Value 'bla'
@@ -114,24 +143,25 @@ Add-Content -path $testFile1 -Value 'bla2'
 
 Wait -Seconds 3
 "file 1 should no longer be present:"
-PrintResult (-not (Test-Path $testFile1))
+AssertEqual $false (Test-Path $testFile1)
 "file 2 should no longer be present:"
-PrintResult (-not (Test-Path $testFile2))
+AssertEqual $false (Test-Path $testFile2)
 "files and their .sha256 sholud be present in a backupset folder:"
-PrintResult ((Get-ChildItem $testAssemblyDirectory -Recurse -File | Where-Object { $_.FullName -match $testAppName }).Count -eq 4)
+AssertEqual 4 (Get-ChildItem $testAssemblyDirectory -Recurse -File | Where-Object { $_.FullName -match $testAppName }).Count 
 
 Wait -Seconds 5
 "backup set should have been moved"
 "from assembly:"
-PrintResult (-not (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName)-*")))
+AssertEqual $false (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName)-*"))
 "to target:"
-PrintResult (Test-Path (Join-Path $testTargetDirectory "$($testAppName)-*"))
+AssertEqual $true (Test-Path (Join-Path $testTargetDirectory "$($testAppName)-*"))
 
 Wait -Seconds 3
 "BackupSetFinishedCommand should have run:"
-PrintResult ((Get-ChildItem $testTargetDirectory -File -Recurse -Filter "finished.txt").Count -gt 0)
+AssertEqual 1 (Get-ChildItem $testTargetDirectory -File -Recurse -Filter "finished.txt").Count 
+Wait -Seconds 2
 "logfile should have expired:"
-PrintResult ((Get-ChildItem $testDirectory -File -Filter "backupset-$($testAppName)*.log").Count -eq 0)
+AssertEqual 0 (Get-ChildItem $testDirectory -File -Filter "backupset-$($testAppName)*.log").Count 
 
 "stopping all jobs..."
 Get-Job | Stop-Job -PassThru | Remove-Job
@@ -164,27 +194,27 @@ $testFile3 = (Join-Path $appdirectory3 'test1.txt')
 Set-Content -path $testFile2 -Value 'bla'
 Set-Content -path $testFile3 -Value 'bla'
 
-Wait -Seconds 1
+Wait -Seconds 2
 "backupsets should exist:"
-PrintResult (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName2)-*"))
-PrintResult (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName3)-*"))
+AssertEqual $true (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName2)-*"))
+AssertEqual $true (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName3)-*"))
 "logfile for backupsets should exist:"
-PrintResult ((Get-ChildItem $testDirectory -File -Filter "backupset-$($testAppName2)*.log").Count -gt 0)
-PrintResult ((Get-ChildItem $testDirectory -File -Filter "backupset-$($testAppName3)*.log").Count -gt 0)
+AssertEqual 1 (Get-ChildItem $testDirectory -File -Filter "backupset-$($testAppName2)*.log").Count
+AssertEqual 1 (Get-ChildItem $testDirectory -File -Filter "backupset-$($testAppName3)*.log").Count
 
-Wait -Seconds 5
+Wait -Seconds 4
 "files and their .sha256 sholud be present in a backupset folder:"
-PrintResult ((Get-ChildItem $testAssemblyDirectory -Recurse -File | Where-Object { $_.FullName -match $testAppName2 }).Count -eq 2)
-PrintResult ((Get-ChildItem $testAssemblyDirectory -Recurse -File | Where-Object { $_.FullName -match $testAppName3 }).Count -eq 2)
+AssertEqual 2 (Get-ChildItem $testAssemblyDirectory -Recurse -File | Where-Object { $_.FullName -match $testAppName2 }).Count 
+AssertEqual 2 (Get-ChildItem $testAssemblyDirectory -Recurse -File | Where-Object { $_.FullName -match $testAppName3 }).Count
 
 Wait -Seconds 5
 "backup set should have been moved"
 "from assembly:"
-PrintResult (-not (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName2)-*")))
-PrintResult (-not (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName3)-*")))
+AssertEqual $false (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName2)-*"))
+AssertEqual $false (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName3)-*"))
 "to target:"
-PrintResult (Test-Path (Join-Path $testTargetDirectory "$($testAppName2)-*"))
-PrintResult (Test-Path (Join-Path $testTargetDirectory "$($testAppName3)-*"))
+AssertEqual $true (Test-Path (Join-Path $testTargetDirectory "$($testAppName2)-*"))
+AssertEqual $true (Test-Path (Join-Path $testTargetDirectory "$($testAppName3)-*"))
 
 "stopping all jobs..."
 Get-Job | Stop-Job -PassThru | Remove-Job

@@ -2,14 +2,14 @@
 <#
     .SYNOPSIS
         Watch backup source directories for changes and trigger the backup process
-        Drop sources: 
+        Drop sources:
             directories where any process may drop an *entire* backup set
             after a timeout, the entire directory is snapshot and then emptied again.
 
         Hosted sources:
             directories where any process may store files persistently.
             periodically, snapshots of the directory are taken
-        
+
 #>
 [CmdletBinding()]
 Param(
@@ -19,64 +19,109 @@ Param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+if ($PSBoundParameters['Debug']) {
+    $DebugPreference = 'Continue'
+}
+
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "4.1"
+$thisFileVersion = "4.2"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
 
 function Main {
-    $thisFileName = Get-Variable -Name "ThisFileName" -ValueOnly
     $config = ReadConfigFile
+    $logFilePath = Initialize-LogFile -Config $config
 
-    # very first thing: enable logging
-    Initialize-WritableDirectory -Path $config.LogPath
-    $logFilePath = Join-Path $config.LogPath "$($thisFileName)-$(Get-Date -AsUTC -Format 'yyyy-MM-dd').log"
-    Add-LogInitHeader -LogfilePath $logFilePath
+    Initialize -Config $config *>&1 | Out-Logged -LogfilePath $logFilePath
 
-    # then continue initializing other infrastructure
-    Initialize-WritableDirectory -Path $config.BackupsetAssemblyPath *>&1 | ForEach-Object { $_; Add-Content -LiteralPath $logFilePath -Encoding utf8NoBOM -Value "$(Get-Date -AsUTC -Format "HH:mm:ss") $_" }
-    Initialize-WritableDirectory -Path $config.BackupsetStorePath *>&1 | ForEach-Object { $_; Add-Content -LiteralPath $logFilePath -Encoding utf8NoBOM -Value "$(Get-Date -AsUTC -Format "HH:mm:ss") $_" }
     $TickInterval = [timespan]::Parse($config.TickInterval)
-    
-    foreach ($path in $config.DropPath) {
-        Test-ReadAccess -Path $path *>&1 | ForEach-Object { $_; Add-Content -LiteralPath $logFilePath -Encoding utf8NoBOM -Value "$(Get-Date -AsUTC -Format "HH:mm:ss") $_" }
-    }
-    foreach ($item in $config.HostedSources) {
-        Test-ReadAccess -Path $item.Path *>&1 | ForEach-Object { $_; Add-Content -LiteralPath $logFilePath -Encoding utf8NoBOM -Value "$(Get-Date -AsUTC -Format "HH:mm:ss") $_" }
-    }
-    
-    # initialize Hosted path watchers
-    foreach ($item in $config.HostedSources) {
-        Start-DirectoryWatch -Path $item.Path -IdleTimeout $item.IdleTimeout *>&1 | ForEach-Object { $_; Add-Content -LiteralPath $logFilePath -Encoding utf8NoBOM -Value "$(Get-Date -AsUTC -Format "HH:mm:ss") $_" }
-    }
-
-    # then loop-wait for changes
+    Write-Debug "start loop-wait ($($config.TickInterval))..." *>&1 | Out-Logged -LogfilePath $logFilePath
     $lastLogFilePath = $logFilePath
     while ($true) {
-        $logFilePath = Join-Path $config.LogPath "$($thisFileName)-$(Get-Date -AsUTC -Format 'yyyy-MM-dd').log"
-        if ($lastLogFilePath -ne $logFilePath) {
-            Add-LogInitHeader -LogfilePath $logFilePath
-            $lastLogFilePath = $logFilePath
-        }
+        $logFilePath = Initialize-LogFile -Config $config -PreviousLogfilePath $lastLogFilePath
 
-        RunLoop -Config $config *>&1 | ForEach-Object { $_; Add-Content -LiteralPath $logFilePath -Encoding utf8NoBOM -Value "$(Get-Date -AsUTC -Format "HH:mm:ss") $_" }
+        RunLoop -Config $config *>&1 | Out-Logged -LogfilePath $logFilePath
         Start-Sleep -Duration $TickInterval
+    }
+}
+
+function Initialize {
+    Param($Config)
+
+    "initialize BackupsetAssemblyPath, BackupsetStorePath..."
+    Initialize-WritableDirectory -Path $Config.BackupsetAssemblyPath
+    Initialize-WritableDirectory -Path $Config.BackupsetStorePath
+
+    "Test-ReadAccess DropPath..."
+    foreach ($path in $Config.DropPath) {
+        Test-ReadAccess -Path $path
+    }
+
+    "Test-ReadAccess HostedSources..."
+    foreach ($item in $Config.HostedSources) {
+        Test-ReadAccess -Path $item.Path
+    }
+
+    "initialize HostedSources..."
+    foreach ($item in $Config.HostedSources) {
+        Start-DirectoryWatch -Path $item.Path -IdleTimeout $item.IdleTimeout
     }
 }
 
 function RunLoop {
     param ($Config)
-    try {        
+    try {
         Remove-FinishedJobs # or broken ones
-  
+
         Start-NewBackupSetJobs -Config $Config
-        Start-NewHostedJobs
+        Start-NewHostedJobs -Config $Config
 
         Remove-ExpiredLogFiles -Config $Config
     }
     catch {
         "[ERROR] RunLoop: $($_.Exception)"
+    }
+}
+
+function Out-Logged {
+    [CmdletBinding()]
+    param(
+        [string]$LogFilePath,
+
+        [Parameter(ValueFromPipeline = $true)]
+        $InputObject
+    )
+    begin {
+        # Ensure directory exists
+        Initialize-WritableDirectory -Path (Split-Path -Parent $LogFilePath)
+        $fileStream = [System.IO.File]::Open($LogFilePath, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+        $encoding = New-Object System.Text.UTF8Encoding($false) # no BOM
+        $writer = New-Object System.IO.StreamWriter($fileStream, $encoding)
+        $writer.AutoFlush = $true
+    }
+
+    process {
+        foreach ($obj in @($InputObject)) {
+            if ($null -eq $obj) { continue }
+
+            # Normalize, remove trailing newlines
+            if ($obj -is [string]) {
+                $text = $obj.TrimEnd("`r", "`n")
+            }
+            else {
+                $text = ($obj | Out-String -Width ([int]::MaxValue)).TrimEnd("`r", "`n")
+            }
+
+            $writer.WriteLine("$(Get-Date -AsUTC -Format "HH:mm:ss") $($text)" );
+
+            # always pass through
+            $obj
+        }
+    }
+
+    end {
+        try { $writer.Flush() } finally { $writer.Dispose() }
     }
 }
 
@@ -87,11 +132,9 @@ function AssembleBackupsetLogged {
     )
 
     $sourceName = Split-Path -Leaf -Path $DropPath
-    $logFilePath = Join-Path $Config.LogPath "backupset-$($sourceName)-$(Get-date -AsUTC -Format 'yyyy-MM-ddTHH-mm').log"
-    Add-LogInitHeader -LogfilePath $logFilePath
-    AssembleBackupset -DropPath $DropPath -Config $Config *>&1 | ForEach-Object { $_; Add-Content -LiteralPath $logFilePath -Encoding utf8NoBOM -Value "$(Get-Date -AsUTC -Format "HH:mm:ss") $_" }
+    $logFilePath = Initialize-LogFile -Config $Config -OverrideFilename "backupset-$($sourceName)-$(Get-date -AsUTC -Format 'yyyy-MM-ddTHH-mm').log"
+    AssembleBackupset -DropPath $DropPath -Config $Config *>&1 | Out-Logged -LogfilePath $logFilePath | Out-Null
 }
-
 
 function AssembleBackupset {
     Param(
@@ -226,14 +269,15 @@ function RunBackupSetFinishedCommand {
     }
 }
 
-function Get-ActiveJobs {     
+function Get-ActiveJobs {
     $activeJobs = @{}
-    Get-Job | Where-Object { $_.State -eq 'Running' } | ForEach-Object {
+
+    Get-Job | Where-Object { ($_.PSJobTypeName -eq 'BackgroundJob') -and ($_.State -eq 'Running') } | ForEach-Object {
         $activeJobs.Add($_.Name, $_) | Out-Null
     }
     Write-Debug "$($activeJobs.Count) active backupset assembly jobs:"
     Write-Debug "'$($activeJobs.Keys -join "', '")'"
-           
+
     return $activeJobs
 }
 
@@ -259,7 +303,7 @@ function Get-NewDropSources {
 }
 
 function Start-NewBackupSetJobs {
-    param ($Config)            
+    param ($Config)
     $dropSources = @(Get-NewDropSources -Config $Config)
     if ($null -eq $dropSources) {
         return
@@ -272,7 +316,7 @@ function Start-NewBackupSetJobs {
             # nothing was dropped here
             continue
         }
-                
+
         "detected items in drop source '$($sourceDir.Name)', starting backupset assembly job..."
         $thisScriptFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).ps1"
         Start-Job -ArgumentList @($thisScriptFile, $sourceDir.FullName, $Config) -Name $sourceDir.FullName -ScriptBlock {
@@ -285,7 +329,7 @@ function Start-NewBackupSetJobs {
 
 function Remove-FinishedJobs {
     param ()
-    $stoppedJobs = @(Get-Job | Where-Object { $_.State -ne 'Running' })
+    $stoppedJobs = @(Get-Job | Where-Object { ($_.PSJobTypeName -eq 'BackgroundJob') -and ($_.State -ne 'Running') })
     Write-Debug "removing $($stoppedJobs.Count) stopped backupset assembly jobs..."
     foreach ($job in $stoppedJobs) {
         "$($job.State) '$($job.Name)'"
@@ -293,7 +337,7 @@ function Remove-FinishedJobs {
             "Job Failed. receiving Output:"
             @($job | Receive-Job | ForEach-Object { "> $($_)" }) -join "`n"
         }
-  
+
         "removing Job '$($job.Name)'..."
         $job | Remove-Job
     }
@@ -301,32 +345,65 @@ function Remove-FinishedJobs {
 
 function Remove-ExpiredLogFiles {
     param ($Config)
-            
+
+    $activeJobs = Get-ActiveJobs
+    $jobTargets = @($activeJobs.Keys | ForEach-Object { split-path -Leaf $_ })
+    # drop?\test-app-name-1  -> backupset-test-app-name-1
+
     $logfileRetentionDuration = [timespan]::Parse($Config.LogfileRetentionDuration)
     Write-Debug "logfileRetentionDuration: '$($logfileRetentionDuration)'"
-    
+
     $allLogfiles = Get-ChildItem -LiteralPath $Config.LogPath -File -Filter *.log
     $expiredLogfiles = $allLogfiles | Where-Object { $_.LastWriteTime.Add($logfileRetentionDuration) -lt (Get-Date) }
     foreach ($expiredLogfile in $expiredLogfiles) {
+        if (($jobTargets.Count -gt 0) -and ($expiredLogfile.Name -match "backupset-($($jobTargets -join '|'))")) {
+            # alternative?
+            #if ($expiredLogfile.Name -match 'backupset-(.*?)-[\d-]{10}T[\d-]{5}\.log$') {
+            #if (@($activeJobs.Keys | Where-Object { $_.EndsWith($Matches[1]) }).Count -gt 0) {
+            "ignoring logfile '$($expiredLogfile.Name)' (a backupset- job with this name is still running)"
+            continue
+        }
+
         "removing expired logfile '$($expiredLogfile.Name)'..."
         Remove-Item -LiteralPath $expiredLogfile.FullName
     }
 }
 
-function Add-LogInitHeader {
+function Initialize-LogFile {
     Param(
-        [string]$LogfilePath
+        $Config,
+        [string]$PreviousLogfilePath,
+        [string]$OverrideFilename
     )
-    $thisFileName = Get-Variable -Name "ThisFileName" -ValueOnly
-    $thisFileVersion = Get-Variable -Name "ThisFileVersion" -ValueOnly
+    if ($null -eq $PreviousLogfilePath) {
+        Write-Debug "Initialize LogPath..."
+        Initialize-WritableDirectory -Path $Config.LogPath | Out-Null
+    }
 
-    if (Test-Path $LogfilePath) {
-        Add-Content -LiteralPath $LogfilePath -Encoding utf8NoBOM -Value "`n`n`n`n`n$(Join-Path $PSScriptRoot $thisFileName).ps1 $($thisFileVersion)"
+    $thisFileName = Get-Variable -Name "ThisFileName" -ValueOnly
+
+    if ([string]::IsNullOrWhiteSpace($OverrideFilename)) {
+        $logFilePath = Join-Path $Config.LogPath "$($thisFileName)-$(Get-Date -AsUTC -Format 'yyyy-MM-dd').log"
     }
     else {
-        Set-Content -LiteralPath $LogfilePath -Encoding utf8NoBOM -Value "$(Join-Path $PSScriptRoot $thisFileName).ps1 $($thisFileVersion)"
+        $logFilePath = Join-Path $Config.LogPath $OverrideFilename
     }
-    Add-Content -LiteralPath $LogfilePath -Value "log time $(Get-Date -AsUTC -Format "HH:mm:ss") UTC is $(Get-Date -Format "HH:mm:ss") local time"
+
+    if ($PreviousLogfilePath -eq $logFilePath) {
+        return $logFilePath
+    }
+
+    $thisFileVersion = Get-Variable -Name "ThisFileVersion" -ValueOnly
+    if (Test-Path $LogfilePath) {
+        # a logfile from a previous execution on the same day exists. eg. restart, reboot, etc.
+        Add-Content -LiteralPath $LogfilePath -Encoding utf8NoBOM -Value "`n`n`n`n`n$(Join-Path $PSScriptRoot $thisFileName).ps1 $($thisFileVersion)" | Out-Null
+    }
+    else {
+        Set-Content -LiteralPath $LogfilePath -Encoding utf8NoBOM -Value "$(Join-Path $PSScriptRoot $thisFileName).ps1 $($thisFileVersion)" | Out-Null
+    }
+
+    "log time $(Get-Date -AsUTC -Format "HH:mm:ss") UTC is $(Get-Date -Format "HH:mm:ss") local time" | Out-Logged -LogFilePath $logFilePath | Out-Null
+    return $logFilePath
 }
 
 
@@ -334,6 +411,11 @@ function Add-LogInitHeader {
 function ReadConfigFile {
     # Workaround: MyInvocation.MyCommand.Definition only contains the path to this file when it's not dot-loaded
     $configFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).json"
+    $schemaFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).schema.json"
+
+    Write-Debug "testing config file schema..."
+    Test-Json -LiteralPath $configFile -SchemaFile $schemaFile | Out-Null
+
     $config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
     Write-Debug "using config from file '$($configFile)':`n$($config | ConvertTo-Json)"
     return $config
@@ -349,7 +431,7 @@ function Test-ReadAccess {
             Write-Error "'$($Path)' does not exist"
             return
         }
-        Get-ChildItem -Recurse -LiteralPath $Path -ErrorAction Stop
+        Get-ChildItem -Recurse -LiteralPath $Path -ErrorAction Stop | Out-Null
     }
     catch {
         Write-Error "cannot read from '$($Path)': $($_.Exception)"
@@ -408,19 +490,19 @@ function Start-DirectoryWatch {
         $IdleTimeout
     )
 
-    Write-Debug "initially analyzing '$($Path)'..."
+    "Start-DirectoryWatch '$($Path)'..."
     $lastWriteTime = (Get-ChildItem -LiteralPath $Path -Recurse -File -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTimeUtc -Descending |
         Select-Object -First 1 -ExpandProperty LastWriteTimeUtc
     )
     if (-not $lastWriteTime) { $lastWriteTime = [datetime]::MinValue }
-    
+
     $watcher = [System.IO.FileSystemWatcher]::new($Path)
     $watcher.IncludeSubdirectories = $true
     $watcher.InternalBufferSize = 64KB  # larger buffer reduces overflow risk (Linux: up to ~64KB)
     $watcherId = "watcher:$([Guid]::NewGuid())"
     $watcherEvents = @()
-    
+
     $directoryWatch = [PSCustomObject]@{
         Path          = $Path
         IdleTimeout   = [timespan]::Parse($IdleTimeout)
@@ -442,12 +524,12 @@ function Start-DirectoryWatch {
             Write-Warning "watcherHandler error: $($_.Exception)"
         }
     }.GetNewClosure()
-        
+
     $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Changed -SourceIdentifier "$($watcherId):Changed" -Action $watcherHandler
     $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Created -SourceIdentifier "$($watcherId):Created" -Action $watcherHandler
     $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Deleted -SourceIdentifier "$($watcherId):Deleted" -Action $watcherHandler
     $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Renamed -SourceIdentifier "$($watcherId):Renamed" -Action $watcherHandler
-    
+
     $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
         try {
             Get-EventSubscriber | Where-Object { $_.SourceIdentifier -like "$($srcBase)*" } | Unregister-Event
@@ -471,9 +553,9 @@ function Start-DirectoryWatch {
 function Get-DirectoryWatch {
     $DIRECTORY_WATCH_LIST = "DIRECTORY_WATCH_LIST"
     $directoryWatchList = Get-Variable -Name $DIRECTORY_WATCH_LIST -Scope Script -ValueOnly -ErrorAction SilentlyContinue
-  
+
     if ($null -eq $directoryWatchList) {
-        return 
+        return
     }
 
     return $directoryWatchList.GetEnumerator() | ForEach-Object { $_.Value }
@@ -538,7 +620,7 @@ function Get-LastSnapshot {
 }
 
 function  Start-NewHostedJobs {
-    Param()
+    Param($Config)
 
     $hostDirectoryWatchers = @(Get-DirectoryWatch)
     if ($null -eq $hostDirectoryWatchers) {
@@ -546,17 +628,30 @@ function  Start-NewHostedJobs {
     }
 
     foreach ($watch in $hostDirectoryWatchers) {
+        if ($watch.LastWriteTime -eq [datetime]::MinValue) {
+            continue # empty directory
+        }
+
         if ($watch.LastWriteTime -lt $watch.LastSnapShot) {
-            Write-Debug "change detected in '$($watch.Path)'"
-            if ($watch.LastWriteTime -lt ((Get-Date -AsUTC).Add(-$watch.IdleTimeout))) {
-                Write-Debug "idle timeout exceeded in '$($watch.Path)'"                
+            Write-Debug "change detected ($(PrintDate $watch.LastWriteTime)<$(PrintDate $watch.LastSnapShot)) in '$($watch.Path)'"
+            $ageLimit = (Get-Date -AsUTC).Add(-$watch.IdleTimeout)
+            if ($watch.LastWriteTime -lt $ageLimit) {
+                Write-Debug "idle timeout exceeded ($(PrintDate $watch.LastWriteTime)<$(PrintDate $ageLimit)) in '$($watch.Path)'"
+                $thisScriptFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).ps1"
                 Start-Job -ArgumentList @($thisScriptFile, $watch.Path, $Config) -Name $watch.Path -ScriptBlock {
                     Param($ThisScriptFile, $Path, $Config)
-                    "calling `"restic backup '$($Path)'`"..." 
-                } | Out-Null                
+                    "calling `"restic backup '$($Path)'`"..."
+                } | Out-Null
             }
         }
     }
+}
+
+function PrintDate {
+    param (
+        [datetime]$date
+    )
+    $date.ToString('yyyy-MM-ddTHH:mm:ss')
 }
 
 function Format-ByteSize {
