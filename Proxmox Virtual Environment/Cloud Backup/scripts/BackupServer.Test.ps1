@@ -1,3 +1,4 @@
+#Requires -Version 7
 [CmdletBinding()]
 Param(
     [switch]$Stop,
@@ -167,25 +168,25 @@ function Invoke-MultiDirectoryDropTest {
 
     Wait -Seconds 2
     "backupsets should exist:"
-    Assert-Equal $true (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName2)-*"))
-    Assert-Equal $true (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName3)-*"))
+    Assert-Equal $true (Test-Path (Join-Path $testContext.Config.BackupsetAssemblyPath "$($testAppName2)-*"))
+    Assert-Equal $true (Test-Path (Join-Path $testContext.Config.BackupsetAssemblyPath "$($testAppName3)-*"))
     "logfile for backupsets should exist:"
-    Assert-Equal 1 @(Get-ChildItem $testDirectory -File -Filter "backupset-$($testAppName2)*.log").Count
-    Assert-Equal 1 @(Get-ChildItem $testDirectory -File -Filter "backupset-$($testAppName3)*.log").Count
+    Assert-Equal 1 @(Get-ChildItem $testContext.RootDirectory -File -Filter "backupset-$($testAppName2)*.log").Count
+    Assert-Equal 1 @(Get-ChildItem $testContext.RootDirectory -File -Filter "backupset-$($testAppName3)*.log").Count
 
     Wait -Seconds 4
     "files and their .sha256 sholud be present in a backupset folder:"
-    Assert-Equal 2 @(Get-ChildItem $testAssemblyDirectory -Recurse -File | Where-Object { $_.FullName -match $testAppName2 }).Count 
-    Assert-Equal 2 @(Get-ChildItem $testAssemblyDirectory -Recurse -File | Where-Object { $_.FullName -match $testAppName3 }).Count
+    Assert-Equal 2 @(Get-ChildItem $testContext.Config.BackupsetAssemblyPath -Recurse -File | Where-Object { $_.FullName -match $testAppName2 }).Count 
+    Assert-Equal 2 @(Get-ChildItem $testContext.Config.BackupsetAssemblyPath -Recurse -File | Where-Object { $_.FullName -match $testAppName3 }).Count
 
     Wait -Seconds 5
     "backup set should have been moved"
     "from assembly:"
-    Assert-Equal $false (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName2)-*"))
-    Assert-Equal $false (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName3)-*"))
+    Assert-Equal $false (Test-Path (Join-Path $testContext.Config.BackupsetAssemblyPath "$($testAppName2)-*"))
+    Assert-Equal $false (Test-Path (Join-Path $testContext.Config.BackupsetAssemblyPath "$($testAppName3)-*"))
     "to target:"
-    Assert-Equal $true (Test-Path (Join-Path $testTargetDirectory "$($testAppName2)-*"))
-    Assert-Equal $true (Test-Path (Join-Path $testTargetDirectory "$($testAppName3)-*"))
+    Assert-Equal $true (Test-Path (Join-Path $testContext.Config.BackupsetStorePath "$($testAppName2)-*"))
+    Assert-Equal $true (Test-Path (Join-Path $testContext.Config.BackupsetStorePath "$($testAppName3)-*"))
 
     Stop-TestServer
 }
