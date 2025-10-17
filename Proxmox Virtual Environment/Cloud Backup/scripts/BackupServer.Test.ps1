@@ -195,24 +195,59 @@ function Invoke-SingleDirectoryHostTest {
     Reset-DefaultTestConfig
     $testContext = Get-TestContext
 
-    $testName = "hosted-1-$(New-Id)"
-    $testHostedDirectory = Join-Path $testContext.RootDirectory $testName
-    New-Item -ItemType Directory $testHostedDirectory -ErrorAction SilentlyContinue | Out-Null
+    $hostDirectory = New-TestDirectory $testContext.RootDirectory 'hosted'
         
     $testContext.Config.HostedSources = @(
         [PSCustomObject]@{
-            Path        = $testHostedDirectory
-            IdleTimeout = "00:00:10"
+            Path        = $hostDirectory.FullName
+            IdleTimeout = "00:00:03"
         }
     )
 
     Start-TestServer
 
     "logfile should indicate directoryWatch started"
-    Assert-Equal $true (Test-LogfileMatch -Pattern "Start-DirectoryWatch.*?$($testName)")
+    Assert-Equal $true (Test-LogfileMatch -Pattern "Start-DirectoryWatch.*?$($hostDirectory.Name)")
+
+    "new file should trigger Change-Event..."
+    $newFile = New-TestFile $hostDirectory.FullName -Name 'new'
+    Wait -Seconds 1
+    Assert-Equal $true (Test-LogfileMatch -Pattern $newFile.Name)
+
+    "elapsed IdleTimeout shoud trigger Snapshot..."
+    Wait -Seconds 4
+    Assert-Equal $true (Test-LogfileMatch -Pattern "$($hostDirectory.Name).*?Snapshot")
+
+    "snapshot should show up in restic..."
+    Assert-Equal $true $false
 
     Stop-TestServer
 }
+
+
+<#
+88  88 888888 88     88""Yb 888888 88""Yb .dP"Y8
+88  88 88__   88     88__dP 88__   88__dP `Ybo."
+888888 88""   88  .o 88"""  88""   88"Yb  o.`Y8b
+88  88 888888 88ood8 88     888888 88  Yb 8bodP'
+#>
+
+function New-Id {
+    return [guid]::NewGuid().ToString().Substring(31)    
+}
+
+function New-TestDirectory([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$name) {
+    $fullname = Join-Path $Path "$($name)-$(New-Id)"
+    return (New-Item -ItemType Directory -Path $fullname)
+}
+
+function New-TestFile([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$name) {
+    $fullName = Join-Path $Path "$($name)-$(New-Id)"
+    Set-Content -LiteralPath $fullName -Value (New-Id)
+    return (Get-Item $fullName)
+}
+
+
 
 
 <#
@@ -267,6 +302,7 @@ function Reset-DefaultTestConfig {
     $testContext.Config.HostedSources = @()
 }  
 
+
 <#
 ######## ##        #######  ##      ##     ######   #######  ##    ## ######## ########   #######  ##
 ##       ##       ##     ## ##  ##  ##    ##    ## ##     ## ###   ##    ##    ##     ## ##     ## ##
@@ -302,6 +338,7 @@ function Stop-TestServer {
     "stopping BackupServer..."
     Get-Job | Stop-Job -PassThru | Remove-Job
 }
+
 
 <#
    ###     ######   ######  ######## ########  ######## ####  #######  ##    ##  ######
@@ -341,9 +378,6 @@ function Test-LogfileMatch {
     return $logMatches.Count -gt 0
 }
 
-function New-Id {
-    return [guid]::NewGuid().ToString().Substring(31)    
-}
 
 <#
 ##     ##    ###    #### ##    ##     ######     ###    ##       ##
