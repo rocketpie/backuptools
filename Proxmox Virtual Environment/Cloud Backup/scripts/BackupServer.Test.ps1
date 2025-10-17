@@ -82,12 +82,7 @@ $testTargetDirectory = Join-Path $testDirectory 'target'
 $config = Get-Content -Raw -Path $defaultConfigFile | ConvertFrom-Json
 $config.TickInterval = "00:00:01"
 $config.DropPath = @($testDropDirectory)
-$config.HostedSources = @(
-    [PSCustomObject]@{
-        Path        = $testHostedDirectory
-        IdleTimeout = "00:10:00"
-    }
-)
+$config.HostedSources = @()
 $config.DropFileWriteTimeout = "00:00:02"
 $config.BackupsetAssemblyPath = $testAssemblyDirectory
 $config.BackupsetAssemblyTimeout = "00:00:04"
@@ -97,25 +92,34 @@ $config.LogfileRetentionDuration = "00:00:00:03"
 $config.BackupSetFinishedCommand = "Set-Content -Path '{BackupSetPath}\finished.txt' -Value 'a36e26'"
 $config | ConvertTo-Json | Set-Content -Path $testConfigFile
 
+function Start-TestServer {
+    "updating config file..."
+    $config | ConvertTo-Json | Set-Content -Path $testConfigFile
 
-"starting main job..."
-Start-Job -ArgumentList @($sut, $DebugPreference) -ScriptBlock {
-    Param($Sut, $DebugPref)
-    $DebugPreference = $DebugPref
-    . $Sut
+    "starting BackupServer..."
+    Start-Job -ArgumentList @($sut, $DebugPreference) -ScriptBlock {
+        Param($Sut, $DebugPref)
+        $DebugPreference = $DebugPref
+        . $Sut
+        
+        Main
+    } | Out-Null
+    Wait -Seconds 1
+}
 
-    Main
-} | Out-Null
-Wait -Seconds 1
+function Stop-TestServer {
+    "stopping BackupServer..."
+    Get-Job | Stop-Job -PassThru | Remove-Job
+}
 
+
+Start-TestServer
 "assembly directory should be created:"
 AssertEqual $true (Test-Path $testAssemblyDirectory)
 "target directory should be created:"
 AssertEqual $true (Test-Path $testTargetDirectory)
 "logfile should exist:"
 AssertEqual $true (Test-Path (Join-Path $testDirectory '*.log'))
-"logfile should indicate directoryWatch started"
-AssertEqual $true (Test-LogfileMatch -logPath $testDirectory -Pattern "Start-DirectoryWatch.*?host1")
 
 
 "creating test app directory..."
@@ -163,22 +167,12 @@ Wait -Seconds 2
 "logfile should have expired:"
 AssertEqual 0 (Get-ChildItem $testDirectory -File -Filter "backupset-$($testAppName)*.log").Count 
 
-"stopping all jobs..."
-Get-Job | Stop-Job -PassThru | Remove-Job
 
-
+Stop-TestServer
 "change to multi-drop config..."
 $config.DropPath = @($testDropDirectory, $testDropDirectory2)
-$config | ConvertTo-Json | Set-Content -Path $testConfigFile
-"restarting main job..."
-Start-Job -ArgumentList @($sut, $DebugPreference) -ScriptBlock {
-    Param($Sut, $DebugPref)
-    $DebugPreference = $DebugPref
-    . $Sut
+Start-TestServer
 
-    Main
-} | Out-Null
-Wait -Seconds 1
 
 "creating test app directories..."
 $testAppName2 = 'test-app-name-2'
@@ -216,9 +210,27 @@ AssertEqual $false (Test-Path (Join-Path $testAssemblyDirectory "$($testAppName3
 AssertEqual $true (Test-Path (Join-Path $testTargetDirectory "$($testAppName2)-*"))
 AssertEqual $true (Test-Path (Join-Path $testTargetDirectory "$($testAppName3)-*"))
 
-"stopping all jobs..."
-Get-Job | Stop-Job -PassThru | Remove-Job
 
+Stop-TestServer
+"change to hosted config..."
+$config.DropPath = @()
+$config.HostedSources = @(
+    [PSCustomObject]@{
+        Path        = $testHostedDirectory
+        IdleTimeout = "00:10:00"
+    }
+)
+Start-TestServer
+
+"logfile should indicate directoryWatch started"
+AssertEqual $true (Test-LogfileMatch -logPath $testDirectory -Pattern "Start-DirectoryWatch.*?host1")
+
+
+
+
+
+
+Stop-TestServer
 
 "Done."
 Read-Host "press return to remove test directory..."
