@@ -207,13 +207,13 @@ function Invoke-SingleDirectoryHostTest {
 
     Start-TestServer
 
-    "logfile should indicate directoryWatch started"
+    "logfile should indicate directoryWatch started..."
     Assert-Equal $true (Test-LogfileMatch -Pattern "Start-DirectoryWatch.*?$($hostDirectory.Name)")
 
-    "new file should trigger Change-Event..."
+    "new file should trigger/log Change-Event..."
     $newFile = New-TestFile $hostDirectory.FullName -Name 'new'
-    Wait -Seconds 1
-    Assert-Equal $true (Test-LogfileMatch -Pattern $newFile.Name)
+    Wait -Seconds 2
+    Assert-Equal $true (Test-LogfileMatch -Pattern "event.*$($hostDirectory.Name)")
 
     "elapsed IdleTimeout shoud trigger Snapshot..."
     Wait -Seconds 4
@@ -280,8 +280,14 @@ function Initialize-TestRootDirectory {
 }
 
 function Remove-TestRootDirectory {
+    $testRootDirectory = (Join-Path $PSScriptRoot 'test')
+
     $testContext = Get-TestContext
-    Remove-Item $testContext.RootDirectory -Recurse -Force
+    if (($null -ne $testContext) -and ![string]::IsNullOrWhiteSpace($testContext.RootDirectory)) {        
+        $testRootDirectory = $testContext.RootDirectory
+    }
+
+    Remove-Item $testRootDirectory -Recurse -Force
 }
 
     
@@ -371,10 +377,15 @@ function Test-LogfileMatch {
     param (
         [string]$Pattern
     )
-
     $testContext = Get-TestContext
-        
-    $logMatches = @(Select-String -Path (Join-Path $testContext.RootDirectory "backupserver-*.log") -Pattern $Pattern)
+    
+    $logFile = Get-ChildItem $testContext.RootDirectory -File -Filter 'BackupServer-*.log' | Select-Object -First 1
+    if ($null -eq $logFile) {
+        Write-Debug "Test-LogfileMatch: logFile not found"
+        return $false
+    }
+    
+    $logMatches = @(Select-String -Path $logFile.FullName -Pattern $Pattern)
     Write-Debug "Test-LogfileMatch '$($Pattern)': $($logMatches.Count) hit(s)"
     return $logMatches.Count -gt 0
 }

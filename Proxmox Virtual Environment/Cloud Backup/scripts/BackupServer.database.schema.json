@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BackupServer Database File",
+  "type": "object",
+  "properties": {
+    "HostedSources": {
+      "type": "array",
+      "description": "information about HostedSources",
+      "items": {
+        "type": "object",
+        "properties": {
+          "Path": {
+            "type": "string",
+            "description": "Source directory path."
+          },
+          "LastSnapshot": {
+            "type": "string",
+            "description": "ISO8601 timestamp when the last snapshot was created"
+          }
+        },
+        "required": [
+          "Path",
+          "LastSnapshot"
+        ]
+      }
+    }
+  },
+  "required": [
+    "HostedSources"
+  ],
+  "additionalProperties": false
+}

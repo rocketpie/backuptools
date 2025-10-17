@@ -28,9 +28,17 @@
             "type": "string",
             "pattern": "^\\d{2}:\\d{2}:\\d{2}$",
             "description": "Idle timeout duration in HH:MM:SS format."
+          },
+          "CreateSnapshotCommand": {
+            "type": "string",
+            "description": "command to execute after IdleTimeout has been reached. special variables: {Path}"
           }
         },
-        "required": ["Path", "IdleTimeout"]
+        "required": [
+          "Path",
+          "IdleTimeout",
+          "CreateSnapshotCommand"
+        ]
       }
     },
     "BackupsetAssemblyPath": {

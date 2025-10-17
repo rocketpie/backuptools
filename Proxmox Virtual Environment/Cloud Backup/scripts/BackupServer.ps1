@@ -31,53 +31,55 @@ Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 
 function Main {
     $config = ReadConfigFile
-    $logFilePath = Initialize-LogFile -Config $config
+    $logFilePath = Initialize-LogFile
 
-    Initialize -Config $config *>&1 | Out-Logged -LogfilePath $logFilePath
+    Initialize *>&1 | Out-Logged -LogfilePath $logFilePath
 
     $TickInterval = [timespan]::Parse($config.TickInterval)
     Write-Debug "start loop-wait ($($config.TickInterval))..." *>&1 | Out-Logged -LogfilePath $logFilePath
     $lastLogFilePath = $logFilePath
     while ($true) {
-        $logFilePath = Initialize-LogFile -Config $config -PreviousLogfilePath $lastLogFilePath
+        $logFilePath = Initialize-LogFile -PreviousLogfilePath $lastLogFilePath
 
-        RunLoop -Config $config *>&1 | Out-Logged -LogfilePath $logFilePath
+        Invoke-Loop *>&1 | Out-Logged -LogfilePath $logFilePath
         Start-Sleep -Duration $TickInterval
     }
 }
 
 function Initialize {
-    Param($Config)
+    $config = Get-Config
 
     "initialize BackupsetAssemblyPath, BackupsetStorePath..."
-    Initialize-WritableDirectory -Path $Config.BackupsetAssemblyPath
-    Initialize-WritableDirectory -Path $Config.BackupsetStorePath
+    Initialize-WritableDirectory -Path $config.BackupsetAssemblyPath
+    Initialize-WritableDirectory -Path $config.BackupsetStorePath
 
     "Test-ReadAccess DropPath..."
-    foreach ($path in $Config.DropPath) {
+    foreach ($path in $config.DropPath) {
         Test-ReadAccess -Path $path
     }
 
     "Test-ReadAccess HostedSources..."
-    foreach ($item in $Config.HostedSources) {
+    foreach ($item in $config.HostedSources) {
         Test-ReadAccess -Path $item.Path
     }
 
     "initialize HostedSources..."
-    foreach ($item in $Config.HostedSources) {
+    foreach ($item in $config.HostedSources) {
         Start-DirectoryWatch -Path $item.Path -IdleTimeout $item.IdleTimeout
     }
+
+    Read-Database
 }
 
-function RunLoop {
-    param ($Config)
+
+function Invoke-Loop {
     try {
         Remove-FinishedJobs # or broken ones
 
-        Start-NewBackupSetJobs -Config $Config
-        Start-NewHostedJobs -Config $Config
+        Start-NewBackupSetJobs
+        Start-NewHostedJobs
 
-        Remove-ExpiredLogFiles -Config $Config
+        Remove-ExpiredLogFiles
     }
     catch {
         "[ERROR] RunLoop: $($_.Exception)"
@@ -132,7 +134,7 @@ function AssembleBackupsetLogged {
     )
 
     $sourceName = Split-Path -Leaf -Path $DropPath
-    $logFilePath = Initialize-LogFile -Config $Config -OverrideFilename "backupset-$($sourceName)-$(Get-date -AsUTC -Format 'yyyy-MM-ddTHH-mm').log"
+    $logFilePath = Initialize-LogFile -OverrideFilename "backupset-$($sourceName)-$(Get-date -AsUTC -Format 'yyyy-MM-ddTHH-mm').log"
     AssembleBackupset -DropPath $DropPath -Config $Config *>&1 | Out-Logged -LogfilePath $logFilePath | Out-Null
 }
 
@@ -282,8 +284,8 @@ function Get-ActiveJobs {
 }
 
 function Get-NewDropSources {
-    param ($Config)
-    if ($null -eq $Config.DropPath) {
+    $config = Get-Config
+    if ($null -eq $config.DropPath) {
         return
     }
 
@@ -291,7 +293,7 @@ function Get-NewDropSources {
 
     # look for new source drops
     $sourceDirectories = [System.Collections.ArrayList]::new()
-    foreach ($path in $Config.DropPath) {
+    foreach ($path in $config.DropPath) {
         $droppedDirectories = @(Get-ChildItem $path -Directory -ErrorAction SilentlyContinue | Where-Object { -not $activeJobs.ContainsKey($_.FullName) })
         if ($droppedDirectories.Count -gt 0) {
             $sourceDirectories.AddRange($droppedDirectories) | Out-Null
@@ -303,8 +305,8 @@ function Get-NewDropSources {
 }
 
 function Start-NewBackupSetJobs {
-    param ($Config)
-    $dropSources = @(Get-NewDropSources -Config $Config)
+    $config = Get-Config
+    $dropSources = @(Get-NewDropSources)
     if ($null -eq $dropSources) {
         return
     }
@@ -319,7 +321,7 @@ function Start-NewBackupSetJobs {
 
         "detected items in drop source '$($sourceDir.Name)', starting backupset assembly job..."
         $thisScriptFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).ps1"
-        Start-Job -ArgumentList @($thisScriptFile, $sourceDir.FullName, $Config) -Name $sourceDir.FullName -ScriptBlock {
+        Start-Job -ArgumentList @($thisScriptFile, $sourceDir.FullName, $config) -Name $sourceDir.FullName -ScriptBlock {
             Param($ThisScriptFile, $DropPath, $Config)
             . $ThisScriptFile
             AssembleBackupsetLogged -DropPath $DropPath -Config $Config
@@ -344,16 +346,16 @@ function Remove-FinishedJobs {
 }
 
 function Remove-ExpiredLogFiles {
-    param ($Config)
+    $config = Get-Config
 
     $activeJobs = Get-ActiveJobs
     $jobTargets = @($activeJobs.Keys | ForEach-Object { split-path -Leaf $_ })
     # drop?\test-app-name-1  -> backupset-test-app-name-1
 
-    $logfileRetentionDuration = [timespan]::Parse($Config.LogfileRetentionDuration)
+    $logfileRetentionDuration = [timespan]::Parse($config.LogfileRetentionDuration)
     Write-Debug "logfileRetentionDuration: '$($logfileRetentionDuration)'"
 
-    $allLogfiles = Get-ChildItem -LiteralPath $Config.LogPath -File -Filter *.log
+    $allLogfiles = Get-ChildItem -LiteralPath $config.LogPath -File -Filter *.log
     $expiredLogfiles = $allLogfiles | Where-Object { $_.LastWriteTime.Add($logfileRetentionDuration) -lt (Get-Date) }
     foreach ($expiredLogfile in $expiredLogfiles) {
         if (($jobTargets.Count -gt 0) -and ($expiredLogfile.Name -match "backupset-($($jobTargets -join '|'))")) {
@@ -371,22 +373,23 @@ function Remove-ExpiredLogFiles {
 
 function Initialize-LogFile {
     Param(
-        $Config,
         [string]$PreviousLogfilePath,
         [string]$OverrideFilename
     )
+    $config = Get-Config
+
     if ($null -eq $PreviousLogfilePath) {
         Write-Debug "Initialize LogPath..."
-        Initialize-WritableDirectory -Path $Config.LogPath | Out-Null
+        Initialize-WritableDirectory -Path $config.LogPath | Out-Null
     }
 
     $thisFileName = Get-Variable -Name "ThisFileName" -ValueOnly
 
     if ([string]::IsNullOrWhiteSpace($OverrideFilename)) {
-        $logFilePath = Join-Path $Config.LogPath "$($thisFileName)-$(Get-Date -AsUTC -Format 'yyyy-MM-dd').log"
+        $logFilePath = Join-Path $config.LogPath "$($thisFileName)-$(Get-Date -AsUTC -Format 'yyyy-MM-dd').log"
     }
     else {
-        $logFilePath = Join-Path $Config.LogPath $OverrideFilename
+        $logFilePath = Join-Path $config.LogPath $OverrideFilename
     }
 
     if ($PreviousLogfilePath -eq $logFilePath) {
@@ -418,7 +421,40 @@ function ReadConfigFile {
 
     $config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
     Write-Debug "using config from file '$($configFile)':`n$($config | ConvertTo-Json)"
-    return $config
+
+    Set-Variable -Name "Config" -Value $config -Scope Script
+    return $config # default pass-through
+}
+function Get-Config { return Get-Variable -Name "Config" -ValueOnly }
+
+# read the database.json file
+function Read-Database {
+    $databaseFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).database.json"
+    $schemaFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).database.schema.json"
+
+    if (Test-Path $databaseFile) {
+        Write-Debug "testing database file schema..."
+        Test-Json -LiteralPath $databaseFile -SchemaFile $schemaFile | Out-Null
+
+        $database = Get-Content -LiteralPath $databaseFile -Raw | ConvertFrom-Json
+        Write-Debug "using database file '$($databaseFile)':`n$($database | ConvertTo-Json)"
+    }
+    else {
+        Write-Debug "creating new database..."
+        $database = [PSCustomObject]@{
+            HostedSources = @() # HostedSource: Path, LastSnapshot
+        }
+    }
+
+    Set-Variable -Name "Database" -Value $database -Scope Script
+}
+
+function Get-Database { return (Get-Variable "Database" -ValueOnly) }
+
+function Write-Database {
+    $database = Get-Database    
+    $databaseFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).database.json"
+    Set-Content -LiteralPath $databaseFile -Value ($database | ConvertTo-Json)
 }
 
 
@@ -506,53 +542,57 @@ function Start-DirectoryWatch {
     $directoryWatch = [PSCustomObject]@{
         Path          = $Path
         IdleTimeout   = [timespan]::Parse($IdleTimeout)
-        Watcher       = $watcher
-        WatcherEvents = $watcherEvents
-        LastWriteTime = $lastWriteTime
-        LastSnapShot  = (Get-LastSnapshot -Path $Path)
+        Watcher       = $watcher # the FileSystemWatcher object
+        WatcherEvents = $watcherEvents # all registered FileSystemWatcher ObjectEvents
+        LastWriteTime = $lastWriteTime # the latest write timestamp of any file in Path
+        LastSnapShot  = (Get-LastSnapshot -Path $Path) # the last snapshot from the backup system
+        LastEventTime = $null # the latest timestamp an event was observed
     }
 
     # watcher event handler
     $watcherHandler = {
         param($EventSource, $EventArguments)
         try {
+            $DebugPreference = 'Continue'
+            $directoryWatch = $Event.MessageData
+            
             # for simplicity, any change event should just move our latest pointer to 'now'
             Write-Debug "watcherHandler:'$($Path)'($($directoryWatch.Path))"
-            $directoryWatch.LastWriteTime = (Get-Date -AsUTC)
+            $directoryWatch.LastEventTime = (Get-Date -AsUTC)
         }
         catch {
             Write-Warning "watcherHandler error: $($_.Exception)"
         }
-    }.GetNewClosure()
+    }
 
-    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Changed -SourceIdentifier "$($watcherId):Changed" -Action $watcherHandler
-    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Created -SourceIdentifier "$($watcherId):Created" -Action $watcherHandler
-    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Deleted -SourceIdentifier "$($watcherId):Deleted" -Action $watcherHandler
-    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Renamed -SourceIdentifier "$($watcherId):Renamed" -Action $watcherHandler
+    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Changed -SourceIdentifier "$($watcherId):Changed" -Action $watcherHandler -MessageData $directoryWatch
+    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Created -SourceIdentifier "$($watcherId):Created" -Action $watcherHandler -MessageData $directoryWatch
+    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Deleted -SourceIdentifier "$($watcherId):Deleted" -Action $watcherHandler -MessageData $directoryWatch
+    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Renamed -SourceIdentifier "$($watcherId):Renamed" -Action $watcherHandler -MessageData $directoryWatch
 
-    $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+    $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -MessageData $watcherId -Action {
         try {
-            Get-EventSubscriber | Where-Object { $_.SourceIdentifier -like "$($srcBase)*" } | Unregister-Event
+            Get-EventSubscriber | Where-Object { $_.SourceIdentifier -like "$($Event.MessageData)*" } | Unregister-Event
             $watcher.Dispose()
         }
         catch { }
-    }.GetNewClosure()
+    }
 
     $DIRECTORY_WATCH_LIST = "DIRECTORY_WATCH_LIST"
-    $directoryWatchList = Get-Variable -Name $DIRECTORY_WATCH_LIST -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    $directoryWatchList = Get-Variable -Name $DIRECTORY_WATCH_LIST -ValueOnly -ErrorAction SilentlyContinue
     if ($null -eq $directoryWatchList) {
         $directoryWatchList = @{}
     }
 
     $directoryWatchList.Add($directoryWatch.Path, $directoryWatch) | Out-Null
-    Set-Variable -Name $DIRECTORY_WATCH_LIST -Scope Script -Value $directoryWatchList
+    Set-Variable -Name $DIRECTORY_WATCH_LIST -Value $directoryWatchList -Scope Script
 
     $watcher.EnableRaisingEvents = $true
 }
 
 function Get-DirectoryWatch {
     $DIRECTORY_WATCH_LIST = "DIRECTORY_WATCH_LIST"
-    $directoryWatchList = Get-Variable -Name $DIRECTORY_WATCH_LIST -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    $directoryWatchList = Get-Variable -Name $DIRECTORY_WATCH_LIST -ValueOnly -ErrorAction SilentlyContinue
 
     if ($null -eq $directoryWatchList) {
         return
@@ -561,66 +601,25 @@ function Get-DirectoryWatch {
     return $directoryWatchList.GetEnumerator() | ForEach-Object { $_.Value }
 }
 
+function Get-NormalizedPath([string]$Path) { return $Path.Replace('\', '/').TrimEnd('/') }
+
 function Get-LastSnapshot {
     param (
         [string]$Path
     )
-    # TODO: remove Mock
-    return (Get-Date "2025-10-15" -AsUTC)
 
-    # Ensure restic is available
-    $restic = Get-Command 'restic' -ErrorAction SilentlyContinue
-    if (-not $restic) {
-        throw "restic not found in PATH."
+    $database = Get-Database
+    $hostedSourceRecord = $database.HostedSources | Where-Object { (Get-NormalizedPath $_.Path) -eq (Get-NormalizedPath $Path) } | Select-Object -First 1
+
+    if ($null -ne $hostedSourceRecord) {
+        return [datetime]::Parse($hostedSourceRecord.LastSnapShot)
     }
 
-    try {
-        # Ask restic for snapshots matching the path, in JSON
-        $json = & $restic.Source snapshots --json --path $Path 2>$null
-
-        if ([string]::IsNullOrWhiteSpace($json)) {
-            return [datetime]::MinValue
-        }
-
-        $snapshots = $json | ConvertFrom-Json
-        if (-not $snapshots) {
-            return [datetime]::MinValue
-        }
-
-        # Extract, parse to DateTimeOffset, normalize to UTC, select latest
-        $latestUtc =
-        $snapshots |
-        ForEach-Object {
-            # .time is RFC3339/ISO-8601 with offset, e.g. 2023-11-02T09:41:25.123456789+01:00
-            try {
-                ([datetimeoffset]::Parse($_.time, [Globalization.CultureInfo]::InvariantCulture)).UtcDateTime
-            }
-            catch {
-                $null
-            }
-        } |
-        Where-Object { $_ -is [datetime] } |
-        Sort-Object -Descending |
-        Select-Object -First 1
-
-        if ($null -eq $latestUtc) {
-            return [datetime]::MinValue
-        }
-
-        # Ensure the return is a [datetime] (Kind=Utc)
-        if ($latestUtc.Kind -ne [System.DateTimeKind]::Utc) {
-            return [datetime]::SpecifyKind($latestUtc, [System.DateTimeKind]::Utc)
-        }
-
-        return $latestUtc
-    }
-    catch {
-        throw "Failed to query restic snapshots for path '$Path': $($_.Exception)"
-    }
+    return [datetime]::MinValue
 }
 
 function  Start-NewHostedJobs {
-    Param($Config)
+    $config = Get-Config
 
     $hostDirectoryWatchers = @(Get-DirectoryWatch)
     if ($null -eq $hostDirectoryWatchers) {
@@ -628,6 +627,11 @@ function  Start-NewHostedJobs {
     }
 
     foreach ($watch in $hostDirectoryWatchers) {
+        if ($watch.LastEventTime -gt $watch.LastWriteTime) {
+            "detected file event in '$($watch.Path)'"
+            $watch.LastWriteTime = $watch.LastEventTime
+        }
+
         if ($watch.LastWriteTime -eq [datetime]::MinValue) {
             continue # empty directory
         }
@@ -638,7 +642,7 @@ function  Start-NewHostedJobs {
             if ($watch.LastWriteTime -lt $ageLimit) {
                 Write-Debug "idle timeout exceeded ($(PrintDate $watch.LastWriteTime)<$(PrintDate $ageLimit)) in '$($watch.Path)'"
                 $thisScriptFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).ps1"
-                Start-Job -ArgumentList @($thisScriptFile, $watch.Path, $Config) -Name $watch.Path -ScriptBlock {
+                Start-Job -ArgumentList @($thisScriptFile, $watch.Path, $config) -Name $watch.Path -ScriptBlock {
                     Param($ThisScriptFile, $Path, $Config)
                     "calling `"restic backup '$($Path)'`"..."
                 } | Out-Null

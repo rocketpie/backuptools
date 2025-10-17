@@ -7,7 +7,8 @@
     "HostedSources": [
         {
             "Path": "/media/backups/sftp-share/lc3win",
-            "IdleTimeout": "00:10:00"
+            "IdleTimeout": "00:10:00",
+            "CreateSnapshotCommand": "ResticBackup.ps1 -HostedPath '{Path}'"
         }
     ],
     "BackupsetAssemblyPath": "/media/backups/temp-set-assembly",
