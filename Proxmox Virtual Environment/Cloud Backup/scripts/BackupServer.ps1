@@ -48,18 +48,21 @@ function Main {
 
 function Initialize {
     $config = Get-Config
+    
+    "reading database..."
+    Read-Database
 
     "initialize BackupsetAssemblyPath, BackupsetStorePath..."
     Initialize-WritableDirectory -Path $config.BackupsetAssemblyPath
     Initialize-WritableDirectory -Path $config.BackupsetStorePath
 
-    "Test-ReadAccess DropPath..."
     foreach ($path in $config.DropPath) {
+        "Test-ReadAccess DropPath '$($path)'..."
         Test-ReadAccess -Path $path
     }
 
-    "Test-ReadAccess HostedSources..."
     foreach ($item in $config.HostedSources) {
+        "Test-ReadAccess HostedSources '$($item.Path)'..."
         Test-ReadAccess -Path $item.Path
     }
 
@@ -67,8 +70,6 @@ function Initialize {
     foreach ($item in $config.HostedSources) {
         Start-DirectoryWatch -Path $item.Path -IdleTimeout $item.IdleTimeout
     }
-
-    Read-Database
 }
 
 
@@ -537,13 +538,11 @@ function Start-DirectoryWatch {
     $watcher.IncludeSubdirectories = $true
     $watcher.InternalBufferSize = 64KB  # larger buffer reduces overflow risk (Linux: up to ~64KB)
     $watcherId = "watcher:$([Guid]::NewGuid())"
-    $watcherEvents = @()
 
     $directoryWatch = [PSCustomObject]@{
         Path          = $Path
         IdleTimeout   = [timespan]::Parse($IdleTimeout)
         Watcher       = $watcher # the FileSystemWatcher object
-        WatcherEvents = $watcherEvents # all registered FileSystemWatcher ObjectEvents
         LastWriteTime = $lastWriteTime # the latest write timestamp of any file in Path
         LastSnapShot  = (Get-LastSnapshot -Path $Path) # the last snapshot from the backup system
         LastEventTime = $null # the latest timestamp an event was observed
@@ -565,10 +564,10 @@ function Start-DirectoryWatch {
         }
     }
 
-    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Changed -SourceIdentifier "$($watcherId):Changed" -Action $watcherHandler -MessageData $directoryWatch
-    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Created -SourceIdentifier "$($watcherId):Created" -Action $watcherHandler -MessageData $directoryWatch
-    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Deleted -SourceIdentifier "$($watcherId):Deleted" -Action $watcherHandler -MessageData $directoryWatch
-    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Renamed -SourceIdentifier "$($watcherId):Renamed" -Action $watcherHandler -MessageData $directoryWatch
+    Register-ObjectEvent -InputObject $watcher -EventName Changed -SourceIdentifier "$($watcherId):Changed" -Action $watcherHandler -MessageData $directoryWatch
+    Register-ObjectEvent -InputObject $watcher -EventName Created -SourceIdentifier "$($watcherId):Created" -Action $watcherHandler -MessageData $directoryWatch
+    Register-ObjectEvent -InputObject $watcher -EventName Deleted -SourceIdentifier "$($watcherId):Deleted" -Action $watcherHandler -MessageData $directoryWatch
+    Register-ObjectEvent -InputObject $watcher -EventName Renamed -SourceIdentifier "$($watcherId):Renamed" -Action $watcherHandler -MessageData $directoryWatch
 
     $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -MessageData $watcherId -Action {
         try {
@@ -578,21 +577,19 @@ function Start-DirectoryWatch {
         catch { }
     }
 
-    $DIRECTORY_WATCH_LIST = "DIRECTORY_WATCH_LIST"
-    $directoryWatchList = Get-Variable -Name $DIRECTORY_WATCH_LIST -ValueOnly -ErrorAction SilentlyContinue
+    $directoryWatchList = Get-Variable -Name "DIRECTORY_WATCH_LIST" -ValueOnly -ErrorAction SilentlyContinue
     if ($null -eq $directoryWatchList) {
         $directoryWatchList = @{}
     }
 
     $directoryWatchList.Add($directoryWatch.Path, $directoryWatch) | Out-Null
-    Set-Variable -Name $DIRECTORY_WATCH_LIST -Value $directoryWatchList -Scope Script
+    Set-Variable -Name "DIRECTORY_WATCH_LIST" -Value $directoryWatchList -Scope Script
 
     $watcher.EnableRaisingEvents = $true
 }
 
 function Get-DirectoryWatch {
-    $DIRECTORY_WATCH_LIST = "DIRECTORY_WATCH_LIST"
-    $directoryWatchList = Get-Variable -Name $DIRECTORY_WATCH_LIST -ValueOnly -ErrorAction SilentlyContinue
+    $directoryWatchList = Get-Variable -Name "DIRECTORY_WATCH_LIST" -ValueOnly -ErrorAction SilentlyContinue
 
     if ($null -eq $directoryWatchList) {
         return
@@ -627,27 +624,69 @@ function  Start-NewHostedJobs {
     }
 
     foreach ($watch in $hostDirectoryWatchers) {
+        Write-Debug "checking watch: $($watch | Select-Object -Property LastWriteTime,LastSnapShot,LastEventTime | ConvertTo-Json)"
+
         if ($watch.LastEventTime -gt $watch.LastWriteTime) {
             "detected file event in '$($watch.Path)'"
             $watch.LastWriteTime = $watch.LastEventTime
+            continue
         }
 
         if ($watch.LastWriteTime -eq [datetime]::MinValue) {
-            continue # empty directory
+            Write-Verbose "empty directory"
+            continue
         }
 
-        if ($watch.LastWriteTime -lt $watch.LastSnapShot) {
-            Write-Debug "change detected ($(PrintDate $watch.LastWriteTime)<$(PrintDate $watch.LastSnapShot)) in '$($watch.Path)'"
+        if ($watch.LastWriteTime -gt $watch.LastSnapShot) {
+            Write-Debug "change detected ($(PrintDate $watch.LastWriteTime)>$(PrintDate $watch.LastSnapShot))"
             $ageLimit = (Get-Date -AsUTC).Add(-$watch.IdleTimeout)
+
             if ($watch.LastWriteTime -lt $ageLimit) {
-                Write-Debug "idle timeout exceeded ($(PrintDate $watch.LastWriteTime)<$(PrintDate $ageLimit)) in '$($watch.Path)'"
+                Write-Debug "idle timeout exceeded ($(PrintDate $watch.LastWriteTime)<$(PrintDate $ageLimit))"
+
                 $thisScriptFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).ps1"
                 Start-Job -ArgumentList @($thisScriptFile, $watch.Path, $config) -Name $watch.Path -ScriptBlock {
-                    Param($ThisScriptFile, $Path, $Config)
-                    "calling `"restic backup '$($Path)'`"..."
+                    Param($ThisScriptFile, $HostedPath, $Config)
+                    . $ThisScriptFile
+                    RunHostedSourceCommand -Config $Config -Path $HostedPath                    
                 } | Out-Null
             }
         }
+    }
+}
+
+function RunHostedSourceCommand {
+    Param(
+        $Config,
+        [string]$Path
+    )
+    
+    try {
+        $hostedSource = $Config.HostedSources | Where-Object { $_.Path -eq $Path } | Select-Object -First 1
+        if ($null -eq $hostedSource) {
+            Write-Error "40565b '$($Path)'"
+            return
+        }
+        
+        if ([string]::IsNullOrWhiteSpace($hostedSource.CreateSnapshotCommand)) {
+            "no CreateSnapshotCommand configured"
+            return
+        }
+
+        "[STARTED] CreateSnapshotCommand '$($Path)'"
+
+        $command = $hostedSource.CreateSnapshotCommand.Replace("{Path}", $Path)
+        if ($command -eq $hostedSource.CreateSnapshotCommand) {
+            "Hint: use placeholder '{Path}' in CreateSnapshotCommand"
+        }
+
+        "invoking `"$($command)`"..."
+        Invoke-Expression -Command $command
+
+        "[COMPLETED] CreateSnapshotCommand '$($Path)'"
+    }
+    catch {
+        "[ERROR] CreateSnapshotCommand '$($Path)': $($_.Exception)"
     }
 }
 

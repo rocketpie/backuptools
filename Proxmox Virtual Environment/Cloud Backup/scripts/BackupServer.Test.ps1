@@ -25,7 +25,7 @@ Set-Variable "TestContext" -Scope Script -Value $testContext
 function Get-TestContext { return (Get-Variable "TestContext" -ValueOnly) }
 
 
-function Main([string]$TestFilter) {
+function Invoke-Tests([string]$TestFilter) {
     Initialize-TestRootDirectory
 
 
@@ -200,8 +200,9 @@ function Invoke-SingleDirectoryHostTest {
         
     $testContext.Config.HostedSources = @(
         [PSCustomObject]@{
-            Path        = $hostDirectory.FullName
-            IdleTimeout = "00:00:03"
+            Path                  = $hostDirectory.FullName
+            IdleTimeout           = "00:00:03"
+            CreateSnapshotCommand = "Set-Content -Path '{Path}-snapshot.txt' -Value 'a36e26'"
         }
     )
 
@@ -215,13 +216,15 @@ function Invoke-SingleDirectoryHostTest {
     Wait -Seconds 2
     Assert-Equal $true (Test-LogfileMatch -Pattern "event.*$($hostDirectory.Name)")
 
-    "elapsed IdleTimeout shoud trigger Snapshot..."
+    "elapsed IdleTimeout shoud trigger snapshot command..."
     Wait -Seconds 4
-    Assert-Equal $true (Test-LogfileMatch -Pattern "$($hostDirectory.Name).*?Snapshot")
+    Assert-Equal 1 (Get-ChildItem "$($hostDirectory.FullName)-snapshot.txt")
 
-    "snapshot should show up in restic..."
+    "snapshot command run shoud create database file..."
     Assert-Equal $true $false
 
+
+    
     Stop-TestServer
 }
 
@@ -411,4 +414,4 @@ if ($Cleanup) {
     return
 }
 
-Main
+Invoke-Tests
