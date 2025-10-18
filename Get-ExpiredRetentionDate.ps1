@@ -98,9 +98,11 @@ $dateListSorted.AddRange(@($DateList | Sort-Object)) | Out-Null
 
 $expiredDates = [System.Collections.ArrayList]::new()
 foreach ($nextDate in $dateListSorted) {
+    
+    $dateToFit = $nextDate
     foreach ($policyItem in $policies) {
         Write-Debug "fitting '$($nextDate.ToString('u'))' into '$($policyItem.name)'..."
-        $result = AddNext -policy $policyItem -date $nextDate
+        $result = AddNext -policy $policyItem -date $dateToFit
         if ($null -eq $result) { 
             Write-Debug "fits"
             break;
@@ -109,6 +111,9 @@ foreach ($nextDate in $dateListSorted) {
             Write-Debug "doesn't fit yet"
             break;
         }
+        
+        # now we need to try to fit the overflowed date into the next policy
+        $dateToFit = $result
     }
 
     if ($null -ne $result) {

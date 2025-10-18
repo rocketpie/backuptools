@@ -124,6 +124,12 @@ $actual = @(& $sut -Date $data -Policy '2/1d')
 $expected = @($data[1])
 AssertEqual $expected $actual
 
+"TEST: some arbitrary dates in 2/1w, 1/5w ..."
+$data = @([datetime]::New(2025, 2, 28), [datetime]::New(2025, 3, 6), [datetime]::New(2025, 3, 12))
+$actual = @(& $sut -Date $data -Policy '1/1d, 1/2w, 1/6w')
+$expected = @()
+AssertEqual $expected $actual
+
 
 
 # "TEST: two item pipe call..."
