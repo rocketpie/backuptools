@@ -226,15 +226,28 @@ function Invoke-SingleDirectoryHostTest {
     Wait -Seconds 2
     $foundLine = Find-LogfileMatch -Pattern "event.*$($hostDirectory.Name)" -FindAfterLine $foundLine
 
+    Get-ChildItem $testContext.RootDirectory -File -Filter "*-snapshot.txt" | Remove-Item | Out-Null
     "elapsed IdleTimeout shoud trigger snapshot command..."
     Wait -Seconds 4
-    Assert-Equal 1 @(Get-ChildItem "$($hostDirectory.FullName)-snapshot.txt").Count
+    Assert-Equal 1 @(Get-ChildItem $testContext.RootDirectory -File -Filter "*-snapshot.txt").Count
 
     "snapshot command run shoud create database file..."
     Assert-Equal $true (Test-Path $testContext.BackupServerPs1.Replace('.ps1', '.database.json'))
 
-    
+    "next change should trigger next snapshot..."
+    Get-ChildItem $testContext.RootDirectory -File -Filter "*-snapshot.txt" | Remove-Item | Out-Null
+    $newFile2 = New-TestFile $hostDirectory.FullName -Name 'new'
+    Wait -Seconds 4
+    Assert-Equal 1 @(Get-ChildItem $testContext.RootDirectory -File -Filter "*-snapshot.txt").Count    
+
+    "restarting should not trigger next snapsoht..."   
     Stop-TestServer
+    Get-ChildItem $testContext.RootDirectory -File -Filter "*-snapshot.txt" | Remove-Item | Out-Null
+    
+    Start-TestServer
+    Wait -Seconds 4
+    $foundLine = Find-LogfileMatch -Pattern "Start-DirectoryWatch.*?$($hostDirectory.Name)"
+    Assert-Equal 0 @(Get-ChildItem $testContext.RootDirectory -File -Filter "*-snapshot.txt").Count
 }
 
 
@@ -473,24 +486,6 @@ function Assert-Equal($expected, $actual) {
     }
 }
 
-function Find-LogNextMatch {
-    Param ($Pattern)
-    $memory = (Get-Variable -Name "LogMatches" -ValueOnly -ErrorAction SilentlyContinue)
-    if ($null -eq $memory) {
-        $memory = @{}
-        Set-Variable -Name "LogMatches" -Value $memory -Scope Script
-    }
-
-    $lastPos = 0
-    if ($memory.ContainsKey($Pattern)) {
-        $lastPos = $memory[$Pattern]
-    }
-
-    $nextMatch = Find-LogfileMatch -Pattern $Pattern -FindAfterLine $lastPos
-    if ($nextMatch -gt 0) {
-        $memory[$Pattern] = $nextMatch        
-    }
-}
 
 function Find-LogfileMatch {
     param (
