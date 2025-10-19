@@ -30,7 +30,7 @@ Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
 
 function Main {
-    $config = ReadConfigFile
+    $config = Read-ConfigFile
     $logFilePath = Initialize-LogFile
 
     Initialize *>&1 | Out-Logged -LogfilePath $logFilePath
@@ -412,7 +412,7 @@ function Initialize-LogFile {
 
 
 # read the .json config file
-function ReadConfigFile {
+function Read-ConfigFile {
     # Workaround: MyInvocation.MyCommand.Definition only contains the path to this file when it's not dot-loaded
     $configFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).json"
     $schemaFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).schema.json"

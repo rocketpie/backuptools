@@ -5,10 +5,16 @@ Param(
     [Parameter(Mandatory, ParameterSetName = "SetResticEnvironmentVariables")]
     [switch]
     $SetResticEnvironmentVariables,
-    
+
+    # create a snapshot of a path **And then remove that path**
     [Parameter(Mandatory, ParameterSetName = "RunBackupset")]
     [string]
-    $BackupsetPath
+    $BackupsetPath,
+
+    # create a snapshot of a path **and then leave it**
+    [Parameter(Mandatory, ParameterSetName = "RunHosted")]
+    [string]
+    $HostedPath
 )
 
 Set-StrictMode -Version Latest
@@ -19,62 +25,45 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "1.8"
+$thisFileVersion = "1.9"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
 
-function Main {
+function Get-Constants {
+    return [PSCustomObject]@{
+        # literal output ouf restic check when repo is ok.
+        RESTIC_OUTPUT_NO_ERRORS              = "no errors were found"
+        RESTIC_OUTPUT_MATCH_SUCCESS          = "snapshot (\w{8}) saved"
+        RESTIC_OUTPUT_MATCH_FORGOT_SNAPSHOTS = "remove (\d+) snapshots:"
+    }
+}
+
+
+function Invoke-Backupset {
     Param(
-        [string]$BackupsetPath
+        # eg. /media/backups/backupsets/immich-2025-10-15T02-00-00
+        [string]$Path
     )
+    Test-Restic
+    $const = Get-Constants
+    $config = Read-ConfigFile
 
-    # literal output ouf restic check when repo is ok.
-    $RESTIC_OUTPUT_NO_ERRORS = 'no errors were found'
-    $RESTIC_OUTPUT_MATCH_SUCCESS = 'snapshot (\w{8}) saved'
-    $RESTIC_OUTPUT_MATCH_FORGOT_SNAPSHOTS = 'remove (\d+) snapshots:'
-
-
-    $config = ReadConfigFile
-    if ($config.ResticRepositoryPath -match '^/|[A-Z]:[/\\]') {
-        Write-Debug "identified ResticRepositoryPath to be a local Path"
-        if (-not (Test-Path -Path $config.ResticRepositoryPath -PathType Container)) {
-            Write-Error "[ERROR] cannot find ResticRepositoryPath '$($config.ResticRepositoryPath)'"
-            return
-        }
-    }
-    else {
-        Write-Warning "ATTENTION: unkown type of ResticRepositoryPath. Untested behaviour ahead!"
-    }
-
-    if ([string]::IsNullOrWhiteSpace($config.ResticPassword)) {
-        Write-Error "[ERROR] empty ResticPassword '$($config.ResticRepositoryPath)'"
-        return
-    }
-
-
-    $backupsetName = Split-Path -Leaf $BackupsetPath
+    # eg. immich-2025-10-15T02-00-00
+    $backupsetName = Split-Path -Leaf $Path
     $sourceNameMatch = [regex]::Match($backupsetName, '^(.*)-([\d-]{10})T([\d-]{5})$')
     if (-not $sourceNameMatch.Success) {
         Write-Error "cannot find sourceName from backupSetName '$($backupsetName)'"
     }
+    # eg. paperless / immich / ...
     $sourceName = $sourceNameMatch.Groups[1].Value
-
-    $backupLocation = Join-Path (Split-Path $BackupsetPath) $sourceName
+        
+    # eg. /media/backups/backupsets/immich
+    $backupLocation = Join-Path (Split-Path $Path) $sourceName
     if (Test-Path -Path $backupLocation) {
-        Write-Error "[ERROR] backup location '$($backupLocation)' is still present (LastWriteTime: '$((Get-Item -Path $backupLocation).LastWriteTime)')"
+        Write-Error "[ERROR] backupset '$($backupLocation)' is still present (LastWriteTime: '$((Get-Item -Path $backupLocation).LastWriteTime)')"
         return
     }
-
-
-    "testing command 'restic'..."
-    if ($null -eq (Get-Command 'restic' -ErrorAction SilentlyContinue)) {
-        Write-Error "[ERROR] cannot find command 'restic'"
-        return
-    }
-
-    $env:RESTIC_REPOSITORY = $config.ResticRepositoryPath
-    $env:RESTIC_PASSWORD = $config.ResticPassword
 
     # https://restic.readthedocs.io/en/stable/075_scripting.html
     "calling 'restic cat config'..."
@@ -87,42 +76,40 @@ function Main {
 
     "calling 'restic check'..."
     $outputSaysNoErrorsFound = $false
-    "$(restic check)".Split([System.Environment]::NewLine) | ForEach-Object { 
+    "$(restic check)".Split([System.Environment]::NewLine) | ForEach-Object {
         $_
-        if ("$($_)".ToLower().Trim() -eq $RESTIC_OUTPUT_NO_ERRORS) {
+        if ("$($_)".ToLower().Trim() -eq $const.RESTIC_OUTPUT_NO_ERRORS) {
             $outputSaysNoErrorsFound = $true
         }
     }
     if (-not $outputSaysNoErrorsFound) {
-        Write-Error "ResticBackup.ps1: cannot continue unless 'restic check' returns '$($RESTIC_OUTPUT_NO_ERRORS)'"
+        Write-Error "ResticBackup.ps1: cannot continue unless 'restic check' returns '$($const.RESTIC_OUTPUT_NO_ERRORS)'"
         return
     }
 
-
-    Move-Item $BackupsetPath $backupLocation
+    Move-Item $Path $backupLocation
 
     "calling `"restic backup '$backupLocation'`"..."
     $outputSaysSnapshotSaved = $false
     & restic backup $backupLocation | ForEach-Object { $_
-        if ([regex]::IsMatch("$_", $RESTIC_OUTPUT_MATCH_SUCCESS)) {
+        if ([regex]::IsMatch("$_", $const.RESTIC_OUTPUT_MATCH_SUCCESS)) {
             $outputSaysSnapshotSaved = $true
         }
     }
     if (-not $outputSaysSnapshotSaved) {
-        Write-Error "ResticBackup.ps1: cannot continue unless 'restic backup' returns '$RESTIC_OUTPUT_MATCH_SUCCESS'"
+        Write-Error "ResticBackup.ps1: cannot continue unless 'restic backup' returns '$const.RESTIC_OUTPUT_MATCH_SUCCESS'"
         return
     }
 
     "removing '$backupLocation'..."
     Remove-Item -Path $backupLocation -Recurse -Force
 
-
     if (($null -ne $config.ResticForgetOptions) -and ($config.ResticForgetOptions.Count -gt 0)) {
         $forgetParams = $config.ResticForgetOptions
         "calling `"restic forget --prune $((JoinParameterString $forgetParams))`"..."
         $forgottenSnapshotCount = 0
         & restic forget @forgetParams | ForEach-Object { $_
-            $outputMatch = [regex]::Match($_, $RESTIC_OUTPUT_MATCH_FORGOT_SNAPSHOTS)
+            $outputMatch = [regex]::Match($_, $const.RESTIC_OUTPUT_MATCH_FORGOT_SNAPSHOTS)
             if ($outputMatch.Success) {
                 [int]::TryParse($outputMatch.Groups[1].Value, [ref]$forgottenSnapshotCount) | Out-Nulls
             }
@@ -134,7 +121,69 @@ function Main {
     }
 
     "Done."
+    RunBackupSuccessCommand -Config $config
+}
 
+function Invoke-Hosted {
+    Param(
+        # eg. /media/backups/hosted/lc3win
+        [string]$Path
+    )
+    Test-Restic
+    $const = Get-Constants
+    $config = Read-ConfigFile
+
+    # https://restic.readthedocs.io/en/stable/075_scripting.html
+    "calling 'restic cat config'..."
+    $outputSaysNoErrorsFound = $false
+    restic cat config
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "ResticBackup.ps1: cannot continue unless 'restic cat config' exits with code 0"
+        return
+    }
+
+    "calling 'restic check'..."
+    $outputSaysNoErrorsFound = $false
+    "$(restic check)".Split([System.Environment]::NewLine) | ForEach-Object {
+        $_
+        if ("$($_)".ToLower().Trim() -eq $const.RESTIC_OUTPUT_NO_ERRORS) {
+            $outputSaysNoErrorsFound = $true
+        }
+    }
+    if (-not $outputSaysNoErrorsFound) {
+        Write-Error "ResticBackup.ps1: cannot continue unless 'restic check' returns '$($const.RESTIC_OUTPUT_NO_ERRORS)'"
+        return
+    }
+
+    "calling `"restic backup '$($Path)'`"..."
+    $outputSaysSnapshotSaved = $false
+    & restic backup $Path | ForEach-Object { $_
+        if ([regex]::IsMatch("$_", $const.RESTIC_OUTPUT_MATCH_SUCCESS)) {
+            $outputSaysSnapshotSaved = $true
+        }
+    }
+    if (-not $outputSaysSnapshotSaved) {
+        Write-Error "ResticBackup.ps1: cannot continue unless 'restic backup' returns '$const.RESTIC_OUTPUT_MATCH_SUCCESS'"
+        return
+    }
+
+    if (($null -ne $config.ResticForgetOptions) -and ($config.ResticForgetOptions.Count -gt 0)) {
+        $forgetParams = $config.ResticForgetOptions
+        "calling `"restic forget --prune $((JoinParameterString $forgetParams))`"..."
+        $forgottenSnapshotCount = 0
+        & restic forget @forgetParams | ForEach-Object { $_
+            $outputMatch = [regex]::Match($_, $const.RESTIC_OUTPUT_MATCH_FORGOT_SNAPSHOTS)
+            if ($outputMatch.Success) {
+                [int]::TryParse($outputMatch.Groups[1].Value, [ref]$forgottenSnapshotCount) | Out-Nulls
+            }
+        }
+
+        if ($forgottenSnapshotCount -lt 1) {
+            Write-Warning "ResticBackup.ps1: looks like restic didn't remove anything (?)"
+        }
+    }
+
+    "Done."
     RunBackupSuccessCommand -Config $config
 }
 
@@ -185,25 +234,75 @@ function JoinParameterString {
     return $paramsText.ToString()
 }
 
-
-# read the .json config file
-function ReadConfigFile {
-    # Workaround: MyInvocation.MyCommand.Definition only contains the path to this file when it's not dot-loaded
-    $configFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).json"
-    $config = Get-Content -Path $configFile -Raw | ConvertFrom-Json
-    Write-Debug "using config from file '$($configFile)':`n$($config | ConvertTo-Json)"
-    return $config
+function Test-Restic {
+    "testing command 'restic'..."
+    if ($null -eq (Get-Command 'restic' -ErrorAction SilentlyContinue)) {
+        Write-Error "[ERROR] cannot find command 'restic'"
+        return
+    }
 }
 
-switch ($PSCmdlet.ParameterSetName) {
-    SetResticEnvironmentVariables { 
-        $config = ReadConfigFile
-        $env:RESTIC_REPOSITORY = $config.ResticRepositoryPath
-        $env:RESTIC_PASSWORD = $config.ResticPassword
+# read the .json config file
+function Read-ConfigFile {
+    # Workaround: MyInvocation.MyCommand.Definition only contains the path to this file when it's not dot-loaded
+    $configFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).json"
+    $schemaFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).schema.json"
+
+    Write-Debug "testing config file schema..."
+    Test-Json -LiteralPath $configFile -SchemaFile $schemaFile | Out-Null
+
+    $config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
+    Write-Debug "using config from file '$($configFile)':`n$($config | ConvertTo-Json)"
+
+    if ($config.ResticRepositoryPath -match '^/|[A-Z]:[/\\]') {
+        Write-Debug "identified ResticRepositoryPath to be a local Path"
+        if (-not (Test-Path -Path $config.ResticRepositoryPath -PathType Container)) {
+            Write-Error "[ERROR] cannot find ResticRepositoryPath '$($config.ResticRepositoryPath)'"
+            return
+        }
     }
-    
+    else {
+        Write-Warning "ATTENTION: unkown type of ResticRepositoryPath. Untested behaviour ahead!"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($config.ResticPassword)) {
+        Write-Error "[ERROR] empty ResticPassword '$($config.ResticRepositoryPath)'"
+        return
+    }
+
+    # set restic environment variables
+    $env:RESTIC_REPOSITORY = $config.ResticRepositoryPath
+    $env:RESTIC_PASSWORD = $config.ResticPassword
+
+    Set-Variable -Name "Config" -Value $config -Scope Script
+    return $config # default pass-through
+}
+
+function Get-Config { return Get-Variable -Name "Config" -ValueOnly }
+
+
+
+<#
+##     ##    ###    #### ##    ##     ######     ###    ##       ##
+###   ###   ## ##    ##  ###   ##    ##    ##   ## ##   ##       ##
+#### ####  ##   ##   ##  ####  ##    ##        ##   ##  ##       ##
+## ### ## ##     ##  ##  ## ## ##    ##       ##     ## ##       ##
+##     ## #########  ##  ##  ####    ##       ######### ##       ##
+##     ## ##     ##  ##  ##   ###    ##    ## ##     ## ##       ##
+##     ## ##     ## #### ##    ##     ######  ##     ## ######## ########
+#>
+
+switch ($PSCmdlet.ParameterSetName) {
+    SetResticEnvironmentVariables {
+        Read-ConfigFile | Out-Null
+    }
+
     RunBackupset {
-        Main -BackupsetPath $BackupsetPath
+        Invoke-Backupset -Path $BackupsetPath
+    }
+
+    RunHosted {
+        Invoke-Hosted -Path $HostedPath
     }
 }
 

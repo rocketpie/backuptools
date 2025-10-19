@@ -40,20 +40,6 @@ function Invoke-Tests([string]$TestFilter) {
     Remove-TestRootDirectory
 }
 
-function Test-FilterMatch {
-    Param(
-        [string[]]$TestTags
-    )
-    $testFilter = Get-Variable "TestFilterVariable" -ValueOnly
-    $result = $false
-    
-    if ([string]::IsNullOrWhiteSpace($testFilter)) { $result = $true }#NOFILTER    
-    elseif ($TestTags.Contains($testFilter)) { $result = $true }  # filter match
-    
-    Write-Debug "Test-FilterMatch '$($TestTags -join ',')' -TestFilter '$testFilter' => $($result)"
-    return $result
-}
-
 
 <#
 ######## ########  ######  ########  ######
@@ -272,6 +258,21 @@ function New-TestFile([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)
     Set-Content -LiteralPath $fullName -Value (New-Id)
     return (Get-Item $fullName)
 }
+
+function Test-FilterMatch {
+    Param(
+        [string[]]$TestTags
+    )
+    $testFilter = Get-Variable "TestFilterVariable" -ValueOnly
+    $result = $false
+    
+    if ([string]::IsNullOrWhiteSpace($testFilter)) { $result = $true }#NOFILTER    
+    elseif ($TestTags.Contains($testFilter)) { $result = $true }  # filter match
+    
+    Write-Debug "Test-FilterMatch '$($TestTags -join ',')' -TestFilter '$testFilter' => $($result)"
+    return $result
+}
+
 
 
 

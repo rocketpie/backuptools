@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Restic Backup Configuration",
+  "type": "object",
+  "properties": {
+    "ResticRepositoryPath": {
+      "type": "string",
+      "description": "Filesystem or remote path to the Restic repository."
+    },
+    "ResticPassword": {
+      "type": "string",
+      "Pattern":".{20}",
+      "description": "Password used to encrypt the Restic repository (must not be empty, 20+ length)."
+    },
+    "ResticBackupOptions": {
+      "type": "array",
+      "description": "List of additional command-line options for the Restic backup command.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ResticForgetOptions": {
+      "type": "array",
+      "description": "List of command-line options for the Restic forget command (retention policy).",
+      "items": {
+        "type": "string"
+      }
+    },
+    "BackupSuccessCommand": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optional command executed after a successful backup."
+    }
+  },
+  "required": [
+    "ResticRepositoryPath",
+    "ResticPassword",
+    "ResticBackupOptions",
+    "ResticForgetOptions"
+  ],
+  "additionalProperties": false
+}

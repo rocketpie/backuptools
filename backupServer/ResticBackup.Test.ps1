@@ -1,11 +1,125 @@
 #Requires -Version 7
 [CmdletBinding()]
 Param(
+    [switch]$Cleanup
 )
+
+Set-StrictMode -Version Latest
 
 if ($PSBoundParameters['Debug']) {
     $DebugPreference = 'Continue'
 }
+
+$testContext = [PSCustomObject]@{
+    RootDirectory   = ""
+    ResticBackupPs1 = "" # system under test // the ResticBackup.ps1
+    ConfigFile      = ""
+    Config          = $null
+}
+
+Set-Variable "TestContext" -Scope Script -Value $testContext
+function Get-TestContext { return (Get-Variable "TestContext" -ValueOnly) }
+
+
+function Invoke-Tests([string]$TestFilter) {
+    Initialize-TestRootDirectory
+
+
+    Invoke-TestBackupsetPath
+    Invoke-TestHostedPath
+    "TODO: test BackupSuccessCommand call"
+
+
+    "Done."
+    Read-Host "press return to remove test directory..."
+    Remove-TestRootDirectory
+}
+
+
+<#
+######## ########  ######  ########  ######
+   ##    ##       ##    ##    ##    ##    ##
+   ##    ##       ##          ##    ##
+   ##    ######    ######     ##     ######
+   ##    ##             ##    ##          ##
+   ##    ##       ##    ##    ##    ##    ##
+   ##    ########  ######     ##     ######
+#>
+function Invoke-TestBackupsetPath {
+    $testContext = Get-TestContext
+    Reset-DefaultTestConfig
+
+    $testBackupsetsDirectoryPath = Join-Path $testContext.RootDirectory 'backupsets'
+    New-Item -ItemType Directory $testBackupsetsDirectoryPath -ErrorAction SilentlyContinue | Out-Null
+
+    $testSourceName = 'app1'
+    $testBackupsetPath = Join-Path $testBackupsetsDirectoryPath "$($testSourceName)-$(Get-date -AsUTC -Format 'yyyy-MM-ddTHH-mm')"
+    New-Item -ItemType Directory $testBackupsetPath -ErrorAction SilentlyContinue | Out-Null
+
+    "TEST missing repositoy directory..."
+    Remove-Item $testContext.Config.ResticRepositoryPath -ErrorAction SilentlyContinue | Out-Null
+    Invoke-SUT -TestScript { & $testContext.ResticBackupPs1 -BackupsetPath $testBackupsetPath }.GetNewClosure() -ExpectedError 'ResticRepositoryPath'
+    
+    "re-creating '$($testContext.Config.ResticRepositoryPath)'..."
+    New-Item -ItemType Directory $testContext.Config.ResticRepositoryPath -ErrorAction SilentlyContinue | Out-Null
+
+    "testing empty password..."
+    $testContext.Config.ResticPassword = ""
+    Invoke-SUT -TestScript { & $testContext.ResticBackupPs1 -BackupsetPath $testBackupsetPath }.GetNewClosure() -ExpectedError 'ResticPassword'
+    
+    Reset-DefaultTestConfig
+    Invoke-SUT -TestScript { & $testContext.ResticBackupPs1 -BackupsetPath $testBackupsetPath }.GetNewClosure()
+
+    Wait -Seconds 1
+    "verify backupset has moved..."
+    "from '$(Split-Path -Leaf $testBackupsetPath)':"
+    PrintResult -TestResult (-not (Test-Path $testBackupsetPath))
+    "to '...$($testSourceName)'?: (TODO: test that restic took the snapshot)"
+    PrintResult -TestResult ((Test-Path (Join-Path $testContext.Config.ResticRepositoryPath $testSourceName)))
+
+}
+
+function Invoke-TestHostedPath {
+    $testContext = Get-TestContext
+    Reset-DefaultTestConfig
+
+    $testHostedDirectoryPath = Join-Path $testContext.RootDirectory 'hosted'
+    New-Item -ItemType Directory $testHostedDirectoryPath -ErrorAction SilentlyContinue | Out-Null
+
+    $testSourceName = 'laptop'
+    $testSourcePath = Join-Path $testHostedDirectoryPath "$($testSourceName)"
+    New-Item -ItemType Directory $testSourcePath -ErrorAction SilentlyContinue | Out-Null
+    
+    "TEST missing repositoy directory..."
+    Remove-Item $testContext.Config.ResticRepositoryPath -ErrorAction SilentlyContinue | Out-Null   
+    Invoke-SUT -TestScript { & $testContext.ResticBackupPs1 -HostedPath $testSourcePath }.GetNewClosure() -ExpectedError 'ResticRepositoryPath'
+    
+    "re-creating '$($testContext.Config.ResticRepositoryPath)'..."
+    New-Item -ItemType Directory $testContext.Config.ResticRepositoryPath -ErrorAction SilentlyContinue | Out-Null
+
+    "testing empty password..."
+    $testContext.Config.ResticPassword = ""
+    Invoke-SUT -TestScript { & $testContext.ResticBackupPs1 -HostedPath $testSourcePath }.GetNewClosure() -ExpectedError 'ResticPassword'
+        
+    Reset-DefaultTestConfig
+    Invoke-SUT -TestScript { & $testContext.ResticBackupPs1 -HostedPath $testSourcePath }.GetNewClosure()
+    
+    'TODO: test missing source path?'
+    
+    Wait -Seconds 1
+    "verify soure path stays untouced..."
+    PrintResult -TestResult ((Test-Path $testSourcePath))
+
+    'TODO: test all files left untouched...'
+}
+
+
+<#
+88  88 888888 88     88""Yb 888888 88""Yb .dP"Y8
+88  88 88__   88     88__dP 88__   88__dP `Ybo."
+888888 88""   88  .o 88"""  88""   88"Yb  o.`Y8b
+88  88 888888 88ood8 88     888888 88  Yb 8bodP'
+#>
 
 function PrintResult {
     param (
@@ -13,7 +127,7 @@ function PrintResult {
     )
 
     if ($TestResult) { return "PASS" }
-    return "FAIL    <------- !!!"
+    return "FAIL      <--------------        !!!!!!!!"
 }
 
 function Wait([int]$Seconds) {
@@ -21,15 +135,19 @@ function Wait([int]$Seconds) {
     Start-Sleep -Seconds $Seconds
 }
 
-function TryRun {
+function Invoke-SUT {
     param (
-        [scriptblock]$SystemUnderTest,
+        $TestScript,
         [string]$ExpectedError
     )
+    $testContext = Get-TestContext
+
+    "updating config file..."
+    $testContext.Config | ConvertTo-Json | Set-Content -Path $testContext.ConfigFile
     
     $caughtError = $false
     try {
-        & $SystemUnderTest
+        & $TestScript | Out-Null
     }
     catch {
         $caughtError = $true
@@ -58,54 +176,71 @@ function TryRun {
     }
 }
 
-$testDirectory = Join-Path $PSScriptRoot 'test'
-"initializing test directory '$($testDirectory)'..."
-Remove-Item $testDirectory -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory $testDirectory -ErrorAction SilentlyContinue | Out-Null
 
-$thisFileName = [System.IO.Path]::GetFileName($MyInvocation.MyCommand.Definition)
-$scriptName = $thisFileName.Replace('.Test', '')
-$sut = Join-Path $testDirectory $scriptName
-Copy-Item -path (Join-Path $PSScriptRoot $scriptName) -Destination $sut
+<#
+ ######  ########    ###    ######## ########     ######   #######  ##    ## ######## ########   #######  ##
+##    ##    ##      ## ##      ##    ##          ##    ## ##     ## ###   ##    ##    ##     ## ##     ## ##
+##          ##     ##   ##     ##    ##          ##       ##     ## ####  ##    ##    ##     ## ##     ## ##
+ ######     ##    ##     ##    ##    ######      ##       ##     ## ## ## ##    ##    ########  ##     ## ##
+      ##    ##    #########    ##    ##          ##       ##     ## ##  ####    ##    ##   ##   ##     ## ##
+##    ##    ##    ##     ##    ##    ##          ##    ## ##     ## ##   ###    ##    ##    ##  ##     ## ##
+ ######     ##    ##     ##    ##    ########     ######   #######  ##    ##    ##    ##     ##  #######  ########
+#>
 
-$defaultConfigFile = Join-Path $PSScriptRoot $scriptName.Replace('.ps1', '.json')
-$testConfigFile = $sut.Replace('.ps1', '.json')
-"writing test config file '$($testConfigFile)'..."
+function Initialize-TestRootDirectory {
+    $testContext = Get-TestContext
+    $testContext.RootDirectory = Join-Path $PSScriptRoot 'test'
 
-$resticRepoPath = Join-Path $testDirectory 'restic-repo'
+    "initializing test directory '$($testContext.RootDirectory)'..."
+    Remove-Item $testContext.RootDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory $testContext.RootDirectory -ErrorAction SilentlyContinue | Out-Null
 
-$config = Get-Content -Raw -Path $defaultConfigFile | ConvertFrom-Json
-$config.ResticRepositoryPath = $resticRepoPath
-$config.BackupSuccessCommand = $null
-$config | ConvertTo-Json | Set-Content -Path $testConfigFile
+    "copy original test files..."
+    Copy-Item -Path (Join-Path $PSScriptRoot 'ResticBackup*.*') -Destination $testContext.RootDirectory    
 
-$testBackupsetsDirectoryPath = Join-Path $testDirectory 'backupsets'
-New-Item -ItemType Directory $testBackupsetsDirectoryPath -ErrorAction SilentlyContinue | Out-Null
+    $testContext.ResticBackupPs1 = Join-Path $testContext.RootDirectory 'ResticBackup.ps1'
+    $testContext.ConfigFile = Join-Path $testContext.RootDirectory 'ResticBackup.json'
+   
+    $testContext.Config = Get-Content -Raw -LiteralPath $testContext.ConfigFile | ConvertFrom-Json
+    Reset-DefaultTestConfig
+}
 
-$testSourceName = 'app1'
-$testBackupsetPath = Join-Path $testBackupsetsDirectoryPath "$($testSourceName)-$(Get-date -AsUTC -Format 'yyyy-MM-ddTHH-mm')"
-New-Item -ItemType Directory $testBackupsetPath -ErrorAction SilentlyContinue | Out-Null
+function Remove-TestRootDirectory {
+    $testRootDirectory = (Join-Path $PSScriptRoot 'test')
 
-TryRun -SystemUnderTest { & $sut -BackupsetPath $testBackupsetPath } -ExpectedError 'ResticRepositoryPath'
-"creating '$($resticRepoPath)'..."
-New-Item -ItemType Directory $resticRepoPath -ErrorAction SilentlyContinue | Out-Null
+    $testContext = Get-TestContext
+    if (($null -ne $testContext) -and ![string]::IsNullOrWhiteSpace($testContext.RootDirectory)) {        
+        $testRootDirectory = $testContext.RootDirectory
+    }
 
-TryRun -SystemUnderTest { & $sut -BackupsetPath $testBackupsetPath } -ExpectedError 'ResticPassword'
-"setting ResticPassword..."
-$config.ResticPassword = [guid]::NewGuid().ToString()
-$config | ConvertTo-Json | Set-Content -Path $testConfigFile
+    Remove-Item $testRootDirectory -Recurse -Force
+}
+    
+function Reset-DefaultTestConfig {
+    "Resetting test config to default..."
+    $testContext = Get-TestContext
+    
+    $testContext.Config.ResticRepositoryPath = (Join-Path $testContext.RootDirectory 'restic-repo')
+    $testContext.Config.ResticPassword = [guid]::NewGuid().ToString()
+    $testContext.Config.ResticBackupOptions = @()
+    $testContext.Config.ResticForgetOptions = @()
+    $testContext.Config.BackupSuccessCommand = $null
+}  
 
-TryRun -SystemUnderTest { & $sut -BackupsetPath $testBackupsetPath }
 
-Wait -Seconds 1
-"verify backupset has moved..."
-"from '$(Split-Path -Leaf $testBackupsetPath)':"
-PrintResult -TestResult (-not (Test-Path $testBackupsetPath))
-"to '...$($testSourceName)'?: (TODO: test that restic took the snapshot)"
-PrintResult -TestResult ((Test-Path (Join-Path $resticRepoPath $testSourceName)))
+<#
+##     ##    ###    #### ##    ##     ######     ###    ##       ##
+###   ###   ## ##    ##  ###   ##    ##    ##   ## ##   ##       ##
+#### ####  ##   ##   ##  ####  ##    ##        ##   ##  ##       ##
+## ### ## ##     ##  ##  ## ## ##    ##       ##     ## ##       ##
+##     ## #########  ##  ##  ####    ##       ######### ##       ##
+##     ## ##     ##  ##  ##   ###    ##    ## ##     ## ##       ##
+##     ## ##     ## #### ##    ##     ######  ##     ## ######## ########
+#>
 
-"TODO: test BackupSuccessCommand call"
+if ($Cleanup) {
+    Remove-TestRootDirectory
+    return
+}
 
-"Done."
-Read-Host "press return to remove test directory..."
-Remove-Item $testDirectory -Recurse -Force
+Invoke-Tests
