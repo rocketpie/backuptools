@@ -209,20 +209,29 @@ function Invoke-SingleDirectoryHostTest {
     Start-TestServer
 
     "logfile should indicate directoryWatch started..."
-    Assert-Equal $true (Test-LogfileMatch -Pattern "Start-DirectoryWatch.*?$($hostDirectory.Name)")
+    $foundLine = Find-LogfileMatch -Pattern "Start-DirectoryWatch.*?$($hostDirectory.Name)"
 
-    "new file should trigger/log Change-Event..."
+    "new file should trigger/log Changed-Event..."
     $newFile = New-TestFile $hostDirectory.FullName -Name 'new'
     Wait -Seconds 2
-    Assert-Equal $true (Test-LogfileMatch -Pattern "event.*$($hostDirectory.Name)")
+    $foundLine = Find-LogfileMatch -Pattern "event.*$($hostDirectory.Name)"
+
+    "file edit should trigger/log Changed-Event..."
+    Add-Content -Path $newFile.FullName -Value 'test2'
+    Wait -Seconds 2
+    $foundLine = Find-LogfileMatch -Pattern "event.*$($hostDirectory.Name)" -FindAfterLine $foundLine
+
+    "file delete should trigger/log Changed-Event..."
+    Remove-Item $newFile.FullName | Out-Null
+    Wait -Seconds 2
+    $foundLine = Find-LogfileMatch -Pattern "event.*$($hostDirectory.Name)" -FindAfterLine $foundLine
 
     "elapsed IdleTimeout shoud trigger snapshot command..."
     Wait -Seconds 4
-    Assert-Equal 1 (Get-ChildItem "$($hostDirectory.FullName)-snapshot.txt")
+    Assert-Equal 1 @(Get-ChildItem "$($hostDirectory.FullName)-snapshot.txt").Count
 
     "snapshot command run shoud create database file..."
-    Assert-Equal $true $false
-
+    Assert-Equal $true (Test-Path $testContext.BackupServerPs1.Replace('.ps1', '.database.json'))
 
     
     Stop-TestServer
@@ -250,7 +259,6 @@ function New-TestFile([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)
     Set-Content -LiteralPath $fullName -Value (New-Id)
     return (Get-Item $fullName)
 }
-
 
 
 
@@ -360,37 +368,152 @@ function Stop-TestServer {
 ##     ##  ######   ######  ######## ##     ##    ##    ####  #######  ##    ##  ######
 #>
 
-function Assert-Equal {
-    param (
-        $Expected,
-        $Actual
+function Test-Numeric($x) { 
+    return $x -is [int16] -or $x -is [uint16] -or
+    $x -is [int32] -or $x -is [uint32] -or
+    $x -is [int64] -or $x -is [uint64] -or
+    $x -is [single] -or $x -is [double] -or
+    $x -is [decimal]
+}
+function Test-Float($x) { $x -is [double] -or $x -is [single] }
+    
+function Assert-EqualItem {
+    param(
+        $expected,
+        $actual
     )
-    
-    if ($Actual -isnot $Expected.GetType()) {
-        return "FAIL (expected [$($Expected.GetType().Name)] but got [$($Actual.GetType().Name)])   <---------------------- !!!!!"    
+
+    if ($null -eq $expected) {
+        if ($null -eq $actual) { return }
+        else {
+            Write-Error "expected item null, but got $($actual.GetType().Name)"
+            return
+        }
     }
-    elseif ($Expected -ne $Actual) {
-        return "FAIL (expected '$($Expected)' but got '$($Actual)')     <---------------------- !!!!!"
+
+    if ((Test-Numeric $expected) -and (Test-Numeric $actual)) {
+        # floating-point in play -> compare with epsilon
+        if ((Test-Float $expected) -or (Test-Float $actual)) {
+            if ([double]::IsNaN([double]$expected)) {
+                if ([double]::IsNaN($a)) { return }
+                Write-Error "expected item NaN, but got $($actual)"
+                return
+            }
+            
+            # some (small) tolerance for floating-point comparisons
+            if ([math]::Abs([double]$expected - [double]$actual) -le ([double]1e-9)) { return } 
+
+            Write-Error "expected item ~$($expected) but got $($actual)"
+            return
+        }
+
+        # compare all other numerics via decimal
+        if ([decimal]$expected -eq [decimal]$actual) { return }
+
+        Write-Error "expected item '$($expected)' but got '$($actual)'"
+        return
     }
-    
-    return "PASS"
+
+    # Fallback: test same type + same ToString()
+    $expectedTypeName = $expected.GetType().FullName
+    $actualTypeName = $actual.GetType().FullName
+    if ($expectedTypeName -ne $actualTypeName) {
+        Write-Error "expected item type '$expectedTypeName' but got '$actualTypeName'"
+        return
+    }
+
+    $expectedStr = $expected.ToString()
+    $actualStr = $actual.ToString()
+    if ($expectedStr -ne $actualStr) {
+        Write-Error "expected '$($expectedStr)' but got '$($actualStr)'"
+        return
+    }
+
+    Write-Debug "'$($actualStr)' is equal to '$($expectedStr)'"
 }
 
-function Test-LogfileMatch {
+
+function Assert-Equal($expected, $actual) {
+    if ($null -eq $expected) {
+        if ($null -eq $actual) { return }
+        else {
+            Write-Error "expected null, but got $($actual.GetType().Name)"
+            return
+        }
+    }
+
+    if (-not ($expected -is [array])) {
+        return Assert-EqualItem $expected $actual
+    }
+        
+    $expectedTypeName = $expected.GetType().FullName
+    if ($null -eq $actual) {
+        Write-Error "expected type '$($expectedTypeName)', but got (null)"
+        return
+    }
+
+    $actualTypeName = $actual.GetType().FullName
+    if ($expectedTypeName -ne $actualTypeName) {
+        Write-Error "expected type '$($expectedTypeName)' but got '$($actualTypeName)'"        
+        return
+    }
+
+    if ($expected.Count -ne $actual.Count) {
+        Write-Error "expected .Count: $($expected.Count) but got $($actual.Count)"
+        return
+    }
+
+    if ($expectedTypeName -eq 'System.Object[]') {
+        for ($i = 0; $i -lt $expected.Count; $i++) {
+            Assert-EqualItem $expected[$i] $actual[$i]
+        }
+    }
+    else {
+        Assert-EqualItem $expected $actual
+    }
+}
+
+function Find-LogNextMatch {
+    Param ($Pattern)
+    $memory = (Get-Variable -Name "LogMatches" -ValueOnly -ErrorAction SilentlyContinue)
+    if ($null -eq $memory) {
+        $memory = @{}
+        Set-Variable -Name "LogMatches" -Value $memory -Scope Script
+    }
+
+    $lastPos = 0
+    if ($memory.ContainsKey($Pattern)) {
+        $lastPos = $memory[$Pattern]
+    }
+
+    $nextMatch = Find-LogfileMatch -Pattern $Pattern -FindAfterLine $lastPos
+    if ($nextMatch -gt 0) {
+        $memory[$Pattern] = $nextMatch        
+    }
+}
+
+function Find-LogfileMatch {
     param (
-        [string]$Pattern
+        [string]$Pattern,
+        [int]$FindAfterLine = 0
     )
     $testContext = Get-TestContext
     
     $logFile = Get-ChildItem $testContext.RootDirectory -File -Filter 'BackupServer-*.log' | Select-Object -First 1
     if ($null -eq $logFile) {
-        Write-Debug "Test-LogfileMatch: logFile not found"
+        Write-Debug "Find-LogfileMatch: logFile not found"
         return $false
     }
     
     $logMatches = @(Select-String -Path $logFile.FullName -Pattern $Pattern)
-    Write-Debug "Test-LogfileMatch '$($Pattern)': $($logMatches.Count) hit(s)"
-    return $logMatches.Count -gt 0
+    Write-Debug "Find-LogfileMatch '$($Pattern)': $($logMatches.Count) hit(s)"
+    $firstMatchLine = $logMatches | ForEach-Object { $_.LineNumber } | Where-Object { $_ -gt $FindAfterLine } | Sort-Object | Select-Object -First 1
+
+    if ($firstMatchLine -lt 1) {
+        Write-Error "not found in logfile:"
+    }
+
+    return $firstMatchLine
 }
 
 

@@ -538,11 +538,13 @@ function Start-DirectoryWatch {
     $watcher.IncludeSubdirectories = $true
     $watcher.InternalBufferSize = 64KB  # larger buffer reduces overflow risk (Linux: up to ~64KB)
     $watcherId = "watcher:$([Guid]::NewGuid())"
+    $watcherEvents = @()
 
     $directoryWatch = [PSCustomObject]@{
         Path          = $Path
         IdleTimeout   = [timespan]::Parse($IdleTimeout)
         Watcher       = $watcher # the FileSystemWatcher object
+        WatcherEvents = $watcherEvents # all registered FileSystemWatcher ObjectEvents
         LastWriteTime = $lastWriteTime # the latest write timestamp of any file in Path
         LastSnapShot  = (Get-LastSnapshot -Path $Path) # the last snapshot from the backup system
         LastEventTime = $null # the latest timestamp an event was observed
@@ -564,10 +566,10 @@ function Start-DirectoryWatch {
         }
     }
 
-    Register-ObjectEvent -InputObject $watcher -EventName Changed -SourceIdentifier "$($watcherId):Changed" -Action $watcherHandler -MessageData $directoryWatch
-    Register-ObjectEvent -InputObject $watcher -EventName Created -SourceIdentifier "$($watcherId):Created" -Action $watcherHandler -MessageData $directoryWatch
-    Register-ObjectEvent -InputObject $watcher -EventName Deleted -SourceIdentifier "$($watcherId):Deleted" -Action $watcherHandler -MessageData $directoryWatch
-    Register-ObjectEvent -InputObject $watcher -EventName Renamed -SourceIdentifier "$($watcherId):Renamed" -Action $watcherHandler -MessageData $directoryWatch
+    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Changed -SourceIdentifier "$($watcherId):Changed" -Action $watcherHandler -MessageData $directoryWatch
+    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Created -SourceIdentifier "$($watcherId):Created" -Action $watcherHandler -MessageData $directoryWatch
+    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Deleted -SourceIdentifier "$($watcherId):Deleted" -Action $watcherHandler -MessageData $directoryWatch
+    $watcherEvents += Register-ObjectEvent -InputObject $watcher -EventName Renamed -SourceIdentifier "$($watcherId):Renamed" -Action $watcherHandler -MessageData $directoryWatch
 
     $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -MessageData $watcherId -Action {
         try {
