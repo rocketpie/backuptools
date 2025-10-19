@@ -238,10 +238,10 @@ function AssembleBackupset {
         "[ERROR] AssembleBackupset '$($backupsetName)': $($_.Exception)"
     }
 
-    RunBackupSetFinishedCommand -Config $Config -BackupsetName $backupsetName
+    Invoke-BackupSetFinishedCommand -Config $Config -BackupsetName $backupsetName
 }
 
-function RunBackupSetFinishedCommand {
+function Invoke-BackupSetFinishedCommand {
     Param(
         $Config,
         [string]$BackupsetName
@@ -617,6 +617,29 @@ function Get-LastSnapshot {
     return [datetime]::MinValue
 }
 
+function Set-LastSnapshot {
+    param (
+        [string]$Path
+    )
+    $database = Get-Database
+    if ($null -eq $database.HostedSources) {
+        $database | Add-Member -MemberType NoteProperty -Name 'HostedSources' -Value @()
+    }
+
+    $hostedSourceRecord = $database.HostedSources | Where-Object { (Get-NormalizedPath $_.Path) -eq (Get-NormalizedPath $Path) } | Select-Object -First 1
+
+    if ($null -eq $hostedSourceRecord) {
+        $hostedSourceRecord = [PSCustomObject]@{
+            Path         = $Path
+            LastSnapShot = (Get-Date -AsUTC).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        }
+        $database.HostedSources += @($hostedSourceRecord)
+    }
+
+    Write-Database
+}
+
+
 function  Start-NewHostedJobs {
     $config = Get-Config
 
@@ -650,14 +673,27 @@ function  Start-NewHostedJobs {
                 Start-Job -ArgumentList @($thisScriptFile, $watch.Path, $config) -Name $watch.Path -ScriptBlock {
                     Param($ThisScriptFile, $HostedPath, $Config)
                     . $ThisScriptFile
-                    RunHostedSourceCommand -Config $Config -Path $HostedPath                    
+                    Invoke-CreateSnapshotCommandLogged -Config $Config -Path $HostedPath                    
                 } | Out-Null
+
+                Set-LastSnapshot -Path $watch.Path
             }
         }
     }
 }
 
-function RunHostedSourceCommand {
+function Invoke-CreateSnapshotCommandLogged {
+    Param(
+        $Config,
+        [string]$Path
+    )
+
+    $sourceName = Split-Path -Leaf -Path $Path
+    $logFilePath = Initialize-LogFile -OverrideFilename "snapshot-$($sourceName)-$(Get-date -AsUTC -Format 'yyyy-MM-ddTHH-mm').log"
+    Invoke-CreateSnapshotCommand -Config $Config -Path $Path *>&1 | Out-Logged -LogfilePath $logFilePath | Out-Null
+}
+
+function Invoke-CreateSnapshotCommand {
     Param(
         $Config,
         [string]$Path
@@ -683,6 +719,7 @@ function RunHostedSourceCommand {
         }
 
         "invoking `"$($command)`"..."
+        $snapshotStarted = (Get-Date -AsUTC)
         Invoke-Expression -Command $command
 
         "[COMPLETED] CreateSnapshotCommand '$($Path)'"
