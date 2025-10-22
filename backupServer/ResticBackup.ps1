@@ -45,9 +45,9 @@ function Invoke-Backupset {
         # eg. /media/backups/backupsets/immich-2025-10-15T02-00-00
         [string]$Path
     )
-    Test-Restic
     $const = Get-Constants
     $config = Read-ConfigFile
+    Test-Restic
 
     # eg. immich-2025-10-15T02-00-00
     $backupsetName = Split-Path -Leaf $Path
@@ -62,28 +62,6 @@ function Invoke-Backupset {
     $backupLocation = Join-Path (Split-Path $Path) $sourceName
     if (Test-Path -Path $backupLocation) {
         Write-Error "[ERROR] backupset '$($backupLocation)' is still present (LastWriteTime: '$((Get-Item -Path $backupLocation).LastWriteTime)')"
-        return
-    }
-
-    # https://restic.readthedocs.io/en/stable/075_scripting.html
-    "calling 'restic cat config'..."
-    $outputSaysNoErrorsFound = $false
-    restic cat config
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "ResticBackup.ps1: cannot continue unless 'restic cat config' exits with code 0"
-        return
-    }
-
-    "calling 'restic check'..."
-    $outputSaysNoErrorsFound = $false
-    "$(restic check)".Split([System.Environment]::NewLine) | ForEach-Object {
-        $_
-        if ("$($_)".ToLower().Trim() -eq $const.RESTIC_OUTPUT_NO_ERRORS) {
-            $outputSaysNoErrorsFound = $true
-        }
-    }
-    if (-not $outputSaysNoErrorsFound) {
-        Write-Error "ResticBackup.ps1: cannot continue unless 'restic check' returns '$($const.RESTIC_OUTPUT_NO_ERRORS)'"
         return
     }
 
@@ -129,31 +107,10 @@ function Invoke-Hosted {
         # eg. /media/backups/hosted/lc3win
         [string]$Path
     )
-    Test-Restic
     $const = Get-Constants
     $config = Read-ConfigFile
+    Test-Restic
 
-    # https://restic.readthedocs.io/en/stable/075_scripting.html
-    "calling 'restic cat config'..."
-    $outputSaysNoErrorsFound = $false
-    restic cat config
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "ResticBackup.ps1: cannot continue unless 'restic cat config' exits with code 0"
-        return
-    }
-
-    "calling 'restic check'..."
-    $outputSaysNoErrorsFound = $false
-    "$(restic check)".Split([System.Environment]::NewLine) | ForEach-Object {
-        $_
-        if ("$($_)".ToLower().Trim() -eq $const.RESTIC_OUTPUT_NO_ERRORS) {
-            $outputSaysNoErrorsFound = $true
-        }
-    }
-    if (-not $outputSaysNoErrorsFound) {
-        Write-Error "ResticBackup.ps1: cannot continue unless 'restic check' returns '$($const.RESTIC_OUTPUT_NO_ERRORS)'"
-        return
-    }
 
     "calling `"restic backup '$($Path)'`"..."
     $outputSaysSnapshotSaved = $false
@@ -238,6 +195,24 @@ function Test-Restic {
     "testing command 'restic'..."
     if ($null -eq (Get-Command 'restic' -ErrorAction SilentlyContinue)) {
         Write-Error "[ERROR] cannot find command 'restic'"
+        return
+    }
+    
+    # https://restic.readthedocs.io/en/stable/075_scripting.html
+    "calling 'restic cat config'..."
+    $outputSaysNoErrorsFound = $false
+    restic cat config
+
+    "calling 'restic check'..."
+    $outputSaysNoErrorsFound = $false
+    "$(restic check)".Split([System.Environment]::NewLine) | ForEach-Object {
+        $_
+        if ("$($_)".ToLower().Trim() -eq $const.RESTIC_OUTPUT_NO_ERRORS) {
+            $outputSaysNoErrorsFound = $true
+        }
+    }
+    if (-not $outputSaysNoErrorsFound) {
+        Write-Error "ResticBackup.ps1: cannot continue unless 'restic check' returns '$($const.RESTIC_OUTPUT_NO_ERRORS)'"
         return
     }
 }
