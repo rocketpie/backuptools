@@ -1,3 +1,4 @@
+#!/usr/bin/pwsh
 #Requires -Version 7
 <#
     .SYNOPSIS
@@ -24,7 +25,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "4.2"
+$thisFileVersion = "4.3"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -47,28 +48,33 @@ function Main {
 }
 
 function Initialize {
-    $config = Get-Config
+    try {
+        $config = Get-Config
     
-    "reading database..."
-    Read-Database
+        "reading database..."
+        Read-Database
 
-    "initialize BackupsetAssemblyPath, BackupsetStorePath..."
-    Initialize-WritableDirectory -Path $config.BackupsetAssemblyPath
-    Initialize-WritableDirectory -Path $config.BackupsetStorePath
+        "initialize BackupsetAssemblyPath, BackupsetStorePath..."
+        Initialize-WritableDirectory -Path $config.BackupsetAssemblyPath
+        Initialize-WritableDirectory -Path $config.BackupsetStorePath
 
-    foreach ($path in $config.DropPath) {
-        "Test-ReadAccess DropPath '$($path)'..."
-        Test-ReadAccess -Path $path
+        foreach ($path in $config.DropPath) {
+            "Test-ReadAccess DropPath '$($path)'..."
+            Test-ReadAccess -Path $path
+        }
+
+        foreach ($item in $config.HostedSources) {
+            "Test-ReadAccess HostedSources '$($item.Path)'..."
+            Test-ReadAccess -Path $item.Path
+        }
+
+        "initialize HostedSources..."
+        foreach ($item in $config.HostedSources) {
+            Start-DirectoryWatch -Path $item.Path -IdleTimeout $item.IdleTimeout
+        }
     }
-
-    foreach ($item in $config.HostedSources) {
-        "Test-ReadAccess HostedSources '$($item.Path)'..."
-        Test-ReadAccess -Path $item.Path
-    }
-
-    "initialize HostedSources..."
-    foreach ($item in $config.HostedSources) {
-        Start-DirectoryWatch -Path $item.Path -IdleTimeout $item.IdleTimeout
+    catch {
+        Write-Error "Initialize Error: $($_.Exception)"
     }
 }
 
@@ -472,7 +478,8 @@ function Test-ReadAccess {
     }
     catch {
         Write-Error "cannot read from '$($Path)': $($_.Exception)"
-    }
+        return
+    }    
 }
 
 

@@ -1,3 +1,4 @@
+#!/usr/bin/pwsh
 #Requires -Version 7
 [CmdletBinding()]
 Param(
@@ -24,9 +25,9 @@ function Get-TestContext { return (Get-Variable "TestContext" -ValueOnly) }
 function Invoke-Tests([string]$TestFilter) {
     Initialize-TestRootDirectory
 
-
     Invoke-TestBackupsetPath
     Invoke-TestHostedPath
+    Invoke-TestSetEnvironmentVariables
     "TODO: test BackupSuccessCommand call"
 
 
@@ -45,6 +46,14 @@ function Invoke-Tests([string]$TestFilter) {
    ##    ##       ##    ##    ##    ##    ##
    ##    ########  ######     ##     ######
 #>
+function Invoke-TestSetEnvironmentVariables {
+    $testContext = Get-TestContext
+    Reset-DefaultTestConfig
+  
+    "TEST ResticBackup -SetResticEnvironmentVariables..."
+    Invoke-SUT -TestScript { & $testContext.ResticBackupPs1 -SetResticEnvironmentVariables }.GetNewClosure()
+}
+
 function Invoke-TestBackupsetPath {
     $testContext = Get-TestContext
     Reset-DefaultTestConfig

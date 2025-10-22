@@ -1,3 +1,4 @@
+#!/usr/bin/pwsh
 #Requires -Version 7
 [CmdletBinding()]
 Param(
@@ -25,7 +26,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "1.9"
+$thisFileVersion = "1.10"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"

@@ -1,3 +1,4 @@
+#!/usr/bin/pwsh
 #Requires -Version 7
 [CmdletBinding()]
 Param(
@@ -33,7 +34,7 @@ function Invoke-Tests([string]$TestFilter) {
     if (Test-FilterMatch @('multi', 'drop')) { Invoke-MultiDirectoryDropTest }
 
     if (Test-FilterMatch @('single', 'host')) { Invoke-SingleDirectoryHostTest }
-
+    if (Test-FilterMatch @('log')) { Invoke-MissingDirectoryTest }
 
     "Done."
     Read-Host "press return to remove test directory..."
@@ -236,6 +237,9 @@ function Invoke-SingleDirectoryHostTest {
     Assert-Equal 0 @(Get-ChildItem $testContext.RootDirectory -File -Filter "*-snapshot.txt").Count
 }
 
+function Invoke-MissingDirectoryTest {
+    "TODO: Test missing host directory error should be found in logfile"
+}
 
 <#
 88  88 888888 88     88""Yb 888888 88""Yb .dP"Y8
