@@ -25,7 +25,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "4.4"
+$thisFileVersion = "4.5"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -563,10 +563,10 @@ function Start-DirectoryWatch {
         param($EventSource, $EventArguments)
         try {
             $directoryWatch = $Event.MessageData
-            $DebugPreference = $directoryWatch.DebugPreference
+            #$DebugPreference = $directoryWatch.DebugPreference
             
             # for simplicity, any change event should just move our latest pointer to 'now'
-            Write-Debug "watcherHandler:'$($Path)'($($directoryWatch.Path))"
+            #Write-Debug "watcherHandler:'$($Path)'($($directoryWatch.Path))"
             $directoryWatch.LastEventTime = (Get-Date -AsUTC)
         }
         catch {
