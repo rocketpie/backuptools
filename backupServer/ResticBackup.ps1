@@ -26,7 +26,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "1.10"
+$thisFileVersion = "1.11"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -115,7 +115,8 @@ function Invoke-Hosted {
 
     "calling `"restic backup '$($Path)'`"..."
     $outputSaysSnapshotSaved = $false
-    & restic backup $Path | ForEach-Object { $_
+    & restic backup $Path | ForEach-Object { 
+        $_
         if ([regex]::IsMatch("$_", $const.RESTIC_OUTPUT_MATCH_SUCCESS)) {
             $outputSaysSnapshotSaved = $true
         }
@@ -206,7 +207,8 @@ function Test-Restic {
 
     "calling 'restic check'..."
     $outputSaysNoErrorsFound = $false
-    "$(restic check)".Split([System.Environment]::NewLine) | ForEach-Object {
+    $resticOutput = @(restic check)
+    $resticOutput | ForEach-Object {
         $_
         if ("$($_)".ToLower().Trim() -eq $const.RESTIC_OUTPUT_NO_ERRORS) {
             $outputSaysNoErrorsFound = $true
