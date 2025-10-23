@@ -25,7 +25,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "4.12"
+$thisFileVersion = "4.13"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -462,7 +462,13 @@ function Read-Database {
     Set-Variable -Name "Database" -Value $database -Scope Script
 }
 
-function Get-Database { return (Get-Variable "Database" -ValueOnly) }
+function Get-Database { 
+    if ($null -eq (Get-Variable "Database" -ErrorAction SilentlyContinue) ) {
+        Read-Database
+    }
+    
+    return (Get-Variable "Database" -ValueOnly)
+}
 
 function Write-Database {
     $database = Get-Database    
