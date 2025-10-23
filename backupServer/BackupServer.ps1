@@ -25,7 +25,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "4.6"
+$thisFileVersion = "4.10"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -37,7 +37,7 @@ function Main {
     Initialize *>&1 | Out-Logged -LogfilePath $logFilePath
 
     $TickInterval = [timespan]::Parse($config.TickInterval)
-    Write-Debug "start loop-wait ($($config.TickInterval))..." *>&1 | Out-Logged -LogfilePath $logFilePath
+    "start loop-wait (1/$($config.TickInterval))..." *>&1 | Out-Logged -LogfilePath $logFilePath
     $lastLogFilePath = $logFilePath
     while ($true) {
         $logFilePath = Initialize-LogFile -PreviousLogfilePath $lastLogFilePath
@@ -72,6 +72,8 @@ function Initialize {
         foreach ($item in $config.HostedSources) {
             Start-DirectoryWatch -Path $item.Path -IdleTimeout $item.IdleTimeout
         }
+
+        "Initialized."
     }
     catch {
         Write-Error "Initialize Error: $($_.Exception)"
@@ -267,9 +269,13 @@ function Invoke-BackupSetFinishedCommand {
         if ($command -eq $commandParameter) {
             "Hint: use placeholder '{BackupSetPath}' in BackupSetFinishedCommand"
         }
+        $localCommand = ($command -replace '^\./', "$($PSScriptRoot)/")
+        if ($localCommand -eq $command) {
+            "Hint: use './' at the start of BackupSetFinishedCommand to refer to the BackupServer.ps1 location"
+        }
 
-        "invoking `"$($command)`"..."
-        Invoke-Expression -Command $command
+        "invoking `"$($localCommand)`"..."
+        Invoke-Expression -Command $localCommand
 
         "[COMPLETED] RunBackupSetFinishedCommand '$($BackupsetName)'"
     }
@@ -627,7 +633,8 @@ function Get-LastSnapshot {
 
 function Set-LastSnapshot {
     param (
-        [string]$Path
+        [string]$Path,
+        [datetime]$LastSnapshot
     )
     $database = Get-Database
     if ($null -eq $database.HostedSources) {
@@ -639,7 +646,7 @@ function Set-LastSnapshot {
     if ($null -eq $hostedSourceRecord) {
         $hostedSourceRecord = [PSCustomObject]@{
             Path         = $Path
-            LastSnapshot = (Get-Date -AsUTC).ToString('yyyy-MM-ddTHH:mm:ssZ')
+            LastSnapshot = $LastSnapshot.ToString('yyyy-MM-ddTHH:mm:ssZ')
         }
         $database.HostedSources += @($hostedSourceRecord)
     }
@@ -671,11 +678,11 @@ function  Start-NewHostedJobs {
         }
 
         if ($watch.LastWriteTime -gt $watch.LastSnapshot) {
-            Write-Debug "change detected ($(PrintDate $watch.LastWriteTime)>$(PrintDate $watch.LastSnapshot))"
+            Write-Debug "change detected ($(PrintDate $watch.LastWriteTime) > $(PrintDate $watch.LastSnapshot))"
             $ageLimit = (Get-Date -AsUTC).Add(-$watch.IdleTimeout)
 
             if ($watch.LastWriteTime -lt $ageLimit) {
-                Write-Debug "idle timeout exceeded ($(PrintDate $watch.LastWriteTime)<$(PrintDate $ageLimit))"
+                Write-Debug "idle timeout exceeded ($(PrintDate $watch.LastWriteTime) < $(PrintDate $ageLimit))"
 
                 $thisScriptFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).ps1"
                 Start-Job -ArgumentList @($thisScriptFile, $watch.Path, $config) -Name $watch.Path -ScriptBlock {
@@ -683,8 +690,6 @@ function  Start-NewHostedJobs {
                     . $ThisScriptFile
                     Invoke-CreateSnapshotCommandLogged -Config $Config -Path $HostedPath                    
                 } | Out-Null
-
-                Set-LastSnapshot -Path $watch.Path
             }
         }
     }
@@ -725,12 +730,17 @@ function Invoke-CreateSnapshotCommand {
         if ($command -eq $hostedSource.CreateSnapshotCommand) {
             "Hint: use placeholder '{Path}' in CreateSnapshotCommand"
         }
+        $localCommand = ($command -replace '^\./', "$($PSScriptRoot)/")
+        if ($localCommand -eq $command) {
+            "Hint: use './' at the start of CreateSnapshotCommand to refer to the BackupServer.ps1 location"
+        }
 
-        "invoking `"$($command)`"..."
+        "invoking `"$($localCommand)`"..."
         $snapshotStarted = (Get-Date -AsUTC)
-        Invoke-Expression -Command $command
+        Invoke-Expression -Command $localCommand
 
         "[COMPLETED] CreateSnapshotCommand '$($Path)'"
+        Set-LastSnapshot -Path $Path -LastSnapshot $snapshotStarted
     }
     catch {
         "[ERROR] CreateSnapshotCommand '$($Path)': $($_.Exception)"
