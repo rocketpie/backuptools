@@ -25,7 +25,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "4.10"
+$thisFileVersion = "4.12"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -290,7 +290,7 @@ function Get-ActiveJobs {
     Get-Job | Where-Object { ($_.PSJobTypeName -eq 'BackgroundJob') -and ($_.State -eq 'Running') } | ForEach-Object {
         $activeJobs.Add($_.Name, $_) | Out-Null
     }
-    Write-Debug "$($activeJobs.Count) active backupset assembly jobs:"
+    Write-Debug "$($activeJobs.Count) active jobs:"
     Write-Debug "'$($activeJobs.Keys -join "', '")'"
 
     return $activeJobs
@@ -611,7 +611,9 @@ function Get-DirectoryWatch {
         return
     }
 
-    return $directoryWatchList.GetEnumerator() | ForEach-Object { $_.Value }
+    $activeJobs = Get-ActiveJobs
+    
+    return ($directoryWatchList.Keys | Where-Object { -not $activeJobs.ContainsKey($_) } | ForEach-Object { $directoryWatchList[$_] })
 }
 
 function Get-NormalizedPath([string]$Path) { return $Path.Replace('\', '/').TrimEnd('/') }
