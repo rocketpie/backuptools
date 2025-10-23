@@ -25,7 +25,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "4.3"
+$thisFileVersion = "4.4"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -548,21 +548,22 @@ function Start-DirectoryWatch {
     $watcherEvents = @()
 
     $directoryWatch = [PSCustomObject]@{
-        Path          = $Path
-        IdleTimeout   = [timespan]::Parse($IdleTimeout)
-        Watcher       = $watcher # the FileSystemWatcher object
-        WatcherEvents = $watcherEvents # all registered FileSystemWatcher ObjectEvents
-        LastWriteTime = $lastWriteTime # the latest write timestamp of any file in Path
-        LastSnapShot  = (Get-LastSnapshot -Path $Path) # the last snapshot from the backup system
-        LastEventTime = $null # the latest timestamp an event was observed
+        Path            = $Path
+        DebugPreference = $DebugPreference
+        IdleTimeout     = [timespan]::Parse($IdleTimeout)
+        Watcher         = $watcher # the FileSystemWatcher object
+        WatcherEvents   = $watcherEvents # all registered FileSystemWatcher ObjectEvents
+        LastWriteTime   = $lastWriteTime # the latest write timestamp of any file in Path
+        LastSnapShot    = (Get-LastSnapshot -Path $Path) # the last snapshot from the backup system
+        LastEventTime   = $null # the latest timestamp an event was observed
     }
 
     # watcher event handler
     $watcherHandler = {
         param($EventSource, $EventArguments)
         try {
-            $DebugPreference = 'Continue'
             $directoryWatch = $Event.MessageData
+            $DebugPreference = $directoryWatch.DebugPreference
             
             # for simplicity, any change event should just move our latest pointer to 'now'
             Write-Debug "watcherHandler:'$($Path)'($($directoryWatch.Path))"
