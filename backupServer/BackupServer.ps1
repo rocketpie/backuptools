@@ -25,7 +25,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "4.5"
+$thisFileVersion = "4.6"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -554,7 +554,7 @@ function Start-DirectoryWatch {
         Watcher         = $watcher # the FileSystemWatcher object
         WatcherEvents   = $watcherEvents # all registered FileSystemWatcher ObjectEvents
         LastWriteTime   = $lastWriteTime # the latest write timestamp of any file in Path
-        LastSnapShot    = (Get-LastSnapshot -Path $Path) # the last snapshot from the backup system
+        LastSnapshot    = (Get-LastSnapshot -Path $Path) # the last snapshot from the backup system
         LastEventTime   = $null # the latest timestamp an event was observed
     }
 
@@ -619,7 +619,7 @@ function Get-LastSnapshot {
     $hostedSourceRecord = $database.HostedSources | Where-Object { (Get-NormalizedPath $_.Path) -eq (Get-NormalizedPath $Path) } | Select-Object -First 1
 
     if ($null -ne $hostedSourceRecord) {
-        return [datetime]::Parse($hostedSourceRecord.LastSnapShot)
+        return [datetime]::Parse($hostedSourceRecord.LastSnapshot)
     }
 
     return [datetime]::MinValue
@@ -639,7 +639,7 @@ function Set-LastSnapshot {
     if ($null -eq $hostedSourceRecord) {
         $hostedSourceRecord = [PSCustomObject]@{
             Path         = $Path
-            LastSnapShot = (Get-Date -AsUTC).ToString('yyyy-MM-ddTHH:mm:ssZ')
+            LastSnapshot = (Get-Date -AsUTC).ToString('yyyy-MM-ddTHH:mm:ssZ')
         }
         $database.HostedSources += @($hostedSourceRecord)
     }
@@ -657,7 +657,7 @@ function  Start-NewHostedJobs {
     }
 
     foreach ($watch in $hostDirectoryWatchers) {
-        Write-Debug "checking watch: $($watch | Select-Object -Property LastWriteTime,LastSnapShot,LastEventTime | ConvertTo-Json)"
+        Write-Debug "checking watch: $($watch | Select-Object -Property LastWriteTime,LastSnapshot,LastEventTime | ConvertTo-Json)"
 
         if ($watch.LastEventTime -gt $watch.LastWriteTime) {
             "detected file event in '$($watch.Path)'"
@@ -670,8 +670,8 @@ function  Start-NewHostedJobs {
             continue
         }
 
-        if ($watch.LastWriteTime -gt $watch.LastSnapShot) {
-            Write-Debug "change detected ($(PrintDate $watch.LastWriteTime)>$(PrintDate $watch.LastSnapShot))"
+        if ($watch.LastWriteTime -gt $watch.LastSnapshot) {
+            Write-Debug "change detected ($(PrintDate $watch.LastWriteTime)>$(PrintDate $watch.LastSnapshot))"
             $ageLimit = (Get-Date -AsUTC).Add(-$watch.IdleTimeout)
 
             if ($watch.LastWriteTime -lt $ageLimit) {
