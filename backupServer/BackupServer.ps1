@@ -25,7 +25,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "4.13"
+$thisFileVersion = "4.14"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -459,21 +459,13 @@ function Read-Database {
         }
     }
 
-    Set-Variable -Name "Database" -Value $database -Scope Script
-}
-
-function Get-Database { 
-    if ($null -eq (Get-Variable "Database" -ErrorAction SilentlyContinue) ) {
-        Read-Database
-    }
-    
-    return (Get-Variable "Database" -ValueOnly)
+    return $database
 }
 
 function Write-Database {
-    $database = Get-Database    
+    Param($NewData)
     $databaseFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).database.json"
-    Set-Content -LiteralPath $databaseFile -Value ($database | ConvertTo-Json)
+    Set-Content -LiteralPath $databaseFile -Value ($NewData | ConvertTo-Json)
 }
 
 
@@ -629,7 +621,7 @@ function Get-LastSnapshot {
         [string]$Path
     )
 
-    $database = Get-Database
+    $database = Read-Database
     $hostedSourceRecord = $database.HostedSources | Where-Object { (Get-NormalizedPath $_.Path) -eq (Get-NormalizedPath $Path) } | Select-Object -First 1
 
     if ($null -ne $hostedSourceRecord) {
@@ -644,11 +636,7 @@ function Set-LastSnapshot {
         [string]$Path,
         [datetime]$LastSnapshot
     )
-    $database = Get-Database
-    if ($null -eq $database.HostedSources) {
-        $database | Add-Member -MemberType NoteProperty -Name 'HostedSources' -Value @()
-    }
-
+    $database = Read-Database
     $hostedSourceRecord = $database.HostedSources | Where-Object { (Get-NormalizedPath $_.Path) -eq (Get-NormalizedPath $Path) } | Select-Object -First 1
 
     if ($null -eq $hostedSourceRecord) {
@@ -659,7 +647,7 @@ function Set-LastSnapshot {
         $database.HostedSources += @($hostedSourceRecord)
     }
 
-    Write-Database
+    Write-Database -NewData $database
 }
 
 
