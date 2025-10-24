@@ -26,7 +26,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "1.11"
+$thisFileVersion = "1.12"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -128,12 +128,12 @@ function Invoke-Hosted {
 
     if (($null -ne $config.ResticForgetOptions) -and ($config.ResticForgetOptions.Count -gt 0)) {
         $forgetParams = $config.ResticForgetOptions
-        "calling `"restic forget --prune $((JoinParameterString $forgetParams))`"..."
+        "calling `"restic forget --prune $(JoinParameterString $forgetParams)`"..."
         $forgottenSnapshotCount = 0
         & restic forget @forgetParams | ForEach-Object { $_
             $outputMatch = [regex]::Match($_, $const.RESTIC_OUTPUT_MATCH_FORGOT_SNAPSHOTS)
             if ($outputMatch.Success) {
-                [int]::TryParse($outputMatch.Groups[1].Value, [ref]$forgottenSnapshotCount) | Out-Nulls
+                [int]::TryParse($outputMatch.Groups[1].Value, [ref]$forgottenSnapshotCount) | Out-Null
             }
         }
 
@@ -180,13 +180,13 @@ function JoinParameterString {
     $first = $true
     foreach ($param in $Parameters) {
         if ($first) { $first = $false }
-        else { $paramsText.Append(' ') }
+        else { $paramsText.Append(' ') | Out-Null }
 
         if ($param.ToString().Trim() -match '\s') {
-            $paramsText.Append("'$($param)'")
+            $paramsText.Append("'$($param)'") | Out-Null
         }
         else {
-            $paramsText.Append($param)
+            $paramsText.Append($param) | Out-Null
         }
     }
 
