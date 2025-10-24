@@ -25,7 +25,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "4.14"
+$thisFileVersion = "4.17"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -51,8 +51,10 @@ function Initialize {
     try {
         $config = Get-Config
     
-        "reading database..."
-        Read-Database
+        "test Read-Database..."
+        if ($null -eq (Read-Database)) {
+            Write-Error "Read-Database -> null"
+        }
 
         "initialize BackupsetAssemblyPath, BackupsetStorePath..."
         Initialize-WritableDirectory -Path $config.BackupsetAssemblyPath
@@ -465,6 +467,7 @@ function Read-Database {
 function Write-Database {
     Param($NewData)
     $databaseFile = Join-Path $PSScriptRoot "$(Get-Variable -Name "ThisFileName" -ValueOnly).database.json"
+    "Write database file '$($databaseFile)': $($NewData | ConvertTo-Json)"
     Set-Content -LiteralPath $databaseFile -Value ($NewData | ConvertTo-Json)
 }
 
@@ -558,7 +561,6 @@ function Start-DirectoryWatch {
         Watcher         = $watcher # the FileSystemWatcher object
         WatcherEvents   = $watcherEvents # all registered FileSystemWatcher ObjectEvents
         LastWriteTime   = $lastWriteTime # the latest write timestamp of any file in Path
-        LastSnapshot    = (Get-LastSnapshot -Path $Path) # the last snapshot from the backup system
         LastEventTime   = $null # the latest timestamp an event was observed
     }
 
@@ -595,6 +597,8 @@ function Start-DirectoryWatch {
     if ($null -eq $directoryWatchList) {
         $directoryWatchList = @{}
     }
+
+    "Started-DirectoryWatch: '$($directoryWatch | ConvertTo-Json)'"
 
     $directoryWatchList.Add($directoryWatch.Path, $directoryWatch) | Out-Null
     Set-Variable -Name "DIRECTORY_WATCH_LIST" -Value $directoryWatchList -Scope Script
@@ -642,10 +646,13 @@ function Set-LastSnapshot {
     if ($null -eq $hostedSourceRecord) {
         $hostedSourceRecord = [PSCustomObject]@{
             Path         = $Path
-            LastSnapshot = $LastSnapshot.ToString('yyyy-MM-ddTHH:mm:ssZ')
+            LastSnapshot = [datetime]::MinValue
         }
         $database.HostedSources += @($hostedSourceRecord)
     }
+
+    "Updating LastSnapshot -> $(PrintDate $LastSnapshot)..."
+    $hostedSourceRecord.LastSnapshot = $LastSnapshot.ToString('yyyy-MM-ddTHH:mm:ssZ')
 
     Write-Database -NewData $database
 }
@@ -673,8 +680,9 @@ function  Start-NewHostedJobs {
             continue
         }
 
-        if ($watch.LastWriteTime -gt $watch.LastSnapshot) {
-            Write-Debug "change detected ($(PrintDate $watch.LastWriteTime) > $(PrintDate $watch.LastSnapshot))"
+        $lastSnapshot = Get-LastSnapshot -Path $watch.Path
+        if ($watch.LastWriteTime -gt $lastSnapshot) {
+            Write-Debug "change detected ($(PrintDate $watch.LastWriteTime) > $(PrintDate $lastSnapshot))"
             $ageLimit = (Get-Date -AsUTC).Add(-$watch.IdleTimeout)
 
             if ($watch.LastWriteTime -lt $ageLimit) {
@@ -735,8 +743,9 @@ function Invoke-CreateSnapshotCommand {
         $snapshotStarted = (Get-Date -AsUTC)
         Invoke-Expression -Command $localCommand
 
-        "[COMPLETED] CreateSnapshotCommand '$($Path)'"
+        "[COMPLETED] CreateSnapshotCommand '$($Path)'. Set-LastSnapshot..."
         Set-LastSnapshot -Path $Path -LastSnapshot $snapshotStarted
+        "[COMPLETED] Last snapshot saved"
     }
     catch {
         "[ERROR] CreateSnapshotCommand '$($Path)': $($_.Exception)"

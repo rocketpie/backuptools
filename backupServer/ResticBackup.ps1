@@ -26,7 +26,7 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "1.12"
+$thisFileVersion = "1.13"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
@@ -70,7 +70,9 @@ function Invoke-Backupset {
 
     "calling `"restic backup '$backupLocation'`"..."
     $outputSaysSnapshotSaved = $false
-    & restic backup $backupLocation | ForEach-Object { $_
+    $resticOutput = @(restic backup $backupLocation)
+    $resticOutput | ForEach-Object { 
+        $_
         if ([regex]::IsMatch("$_", $const.RESTIC_OUTPUT_MATCH_SUCCESS)) {
             $outputSaysSnapshotSaved = $true
         }
@@ -86,8 +88,11 @@ function Invoke-Backupset {
     if (($null -ne $config.ResticForgetOptions) -and ($config.ResticForgetOptions.Count -gt 0)) {
         $forgetParams = $config.ResticForgetOptions
         "calling `"restic forget --prune $((JoinParameterString $forgetParams))`"..."
+        
         $forgottenSnapshotCount = 0
-        & restic forget @forgetParams | ForEach-Object { $_
+        $resticOutput = @(restic forget @forgetParams)
+        $resticOutput | ForEach-Object { 
+            $_
             $outputMatch = [regex]::Match($_, $const.RESTIC_OUTPUT_MATCH_FORGOT_SNAPSHOTS)
             if ($outputMatch.Success) {
                 [int]::TryParse($outputMatch.Groups[1].Value, [ref]$forgottenSnapshotCount) | Out-Nulls
