@@ -766,7 +766,7 @@ function Format-ByteSize {
 
     $magnitude = [System.Math]::Floor([System.Math]::Log($Size, 1024))
     $readableSize = [System.Math]::Round(($Size / [System.Math]::Pow(1024, $magnitude)), 1)
-    return "$($readableSize)$(@('B', 'KB', 'MB', 'GB', 'TB', 'EB')[$magnitude])"
+    return "$($readableSize)$(@('B', 'KB', 'MB', 'GB', 'TB', 'PB')[$magnitude])"
 }
 
 

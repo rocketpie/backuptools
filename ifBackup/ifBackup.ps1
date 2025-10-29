@@ -1,5 +1,5 @@
 #!/usr/bin/pwsh
-#Requires -Version 7
+#Requires -Version 7.3
 <#
     .SYNOPSIS
         make a restic snapshot of all directories if the contents have been modified since the last snapshot.
@@ -26,6 +26,11 @@ function Main {
     $logFilePath = Initialize-LogFile
 
     Initialize *>&1 | Out-Logged -LogfilePath $logFilePath
+    
+    if ($true -ne (Get-Variable -Name "Initialized" -ValueOnly -ErrorAction SilentlyContinue)) {
+        return 
+    }
+
     Invoke-CheckAndSnapshot *>&1 | Out-Logged -LogfilePath $logFilePath
     Remove-ExpiredLogFiles  *>&1 | Out-Logged -LogfilePath $logFilePath
 }
@@ -39,7 +44,7 @@ function Initialize {
         Test-WriteAccess -Path $config.log.path
 
         foreach ($source in $config.snapshots) {
-            $sourcePaths = Get-ChildDirectories -Path $config.path -Recuresdepth $config.recuresdepth
+            $sourcePaths = Get-ChildDirectories -Path $source.path -Recuresdepth $source.recurseDepth
             foreach ($path in $sourcePaths) {
                 "Test-ReadAccess '$($path)'..."
                 Test-ReadAccess -Path $path
@@ -50,9 +55,11 @@ function Initialize {
         $env:RESTIC_REPOSITORY = $config.restic.repositoryPath
         $env:RESTIC_PASSWORD = $config.restic.password
         Test-Restic 
+
+        Set-Variable -Name "Initialized" -Value $true -Scope Script
     }
     catch {
-        Write-Error "Initialize Error: $($_.Exception)"
+        "[ERROR] Initialize: $($_.Exception)"
     }
 }
 
@@ -72,7 +79,7 @@ function Invoke-CheckAndSnapshot {
     $config = Get-Config
 
     foreach ($source in $config.snapshots) {
-        $sourcePaths = Get-ChildDirectories -Path $config.path -Recuresdepth $config.recuresdepth
+        $sourcePaths = Get-ChildDirectories -Path $source.path -Recuresdepth $source.recurseDepth
         foreach ($path in $sourcePaths) {
             try {
                 $lastWrite = Get-LastWriteTimeUtc -Path $path
@@ -81,13 +88,13 @@ function Invoke-CheckAndSnapshot {
                 $idleTime = [timespan]::Parse($source.idleTimeout)
                 $idleThreshold = (Get-Date -AsUTC).Add(-$idleTime)
                 
-                "checking for changes '$($lastWrite)' > '$($lastSnapshot)'"
+                "checking for changes '$(PrintDate $lastWrite)' > '$(PrintDate $lastSnapshot)'"
                 if ($lastWrite -le $lastSnapshot) {
                     "no changes."
                     continue
                 }
             
-                "checking idle '$($lastWrite)' < '$($idleThreshold)'"
+                "checking idle '$(PrintDate $lastWrite)' < '$(PrintDate $idleThreshold)'"
                 if ($lastWrite -gt $idleThreshold) {
                     "write still in progress?"
                     continue
@@ -111,8 +118,6 @@ function Out-Logged {
         $InputObject
     )
     begin {
-        # Ensure directory exists
-        Initialize-WritableDirectory -Path (Split-Path -Parent $LogFilePath)
         $fileStream = [System.IO.File]::Open($LogFilePath, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
         $encoding = New-Object System.Text.UTF8Encoding($false) # no BOM
         $writer = New-Object System.IO.StreamWriter($fileStream, $encoding)
@@ -150,7 +155,8 @@ function Remove-ExpiredLogFiles {
     $allLogfiles = Get-ChildItem -LiteralPath $config.log.path -File -Filter *.log
     
     $logfileRetentionDuration = [timespan]::Parse($config.log.retainLogs)
-    $expiredLogfiles = $allLogfiles | Where-Object { $_.LastWriteTime.Add($logfileRetentionDuration) -lt (Get-Date) }
+    $expirationThreshold = (Get-Date).Add(-$logfileRetentionDuration)
+    $expiredLogfiles = $allLogfiles | Where-Object { $_.LastWriteTime -lt $expirationThreshold }
     foreach ($expiredLogfile in $expiredLogfiles) {
         "removing expired logfile '$($expiredLogfile.Name)'..."
         Remove-Item -LiteralPath $expiredLogfile.FullName
@@ -253,7 +259,7 @@ function Get-ChildDirectories {
         return @($Path)
     }
 
-    return @(Get-ChildItem -LiteralPath $root -Directory -Recurse -Depth $RecurseDepth -Force | Select-Object -ExpandProperty FullName)
+    return @(Get-ChildItem -LiteralPath $Path -Directory -Recurse -Depth $RecurseDepth -Force | Select-Object -ExpandProperty FullName)
 }
 
 # Get the latest LastWriteTimeUtc of all files within a directory
@@ -262,14 +268,14 @@ function Get-LastWriteTimeUtc {
         [string]$Path
     )
 
-    $lastWriteTime = (Get-ChildItem -LiteralPath $Path -Recurse -MaxDepth 100 -File -Force -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTimeUtc -Descending |
-        Select-Object -First 1 -ExpandProperty LastWriteTimeUtc
-    )
-    if ($null -eq $lastWriteTime) { 
-        $lastWriteTime = [datetime]::MinValue
+    $lastWriteTime = [datetime]::MinValue    
+    Get-ChildItem -LiteralPath $Path -Recurse -Depth 100 -File -Force -ErrorAction SilentlyContinue |
+    ForEach-Object { 
+        if ($lastWriteTime -lt $_.LastWriteTimeUtc) {
+            $lastWriteTime = $_.LastWriteTimeUtc
+        }
     }
-
+    
     return $lastWriteTime
 }
 
@@ -280,6 +286,7 @@ function Get-LastSnapshotUtc {
     )
     try { 
         # Query snapshots for the given path in JSON
+        # TODO: restic snapshots --path matches paths as stored in snapshots. Ensure you pass the same absolute, normalized path you used for backup.
         $json = restic snapshots --json --path $Path 2>$null
         if ([string]::IsNullOrWhiteSpace($json)) {
             return [datetime]::MinValue
@@ -326,13 +333,16 @@ function Convert-ResticDateToUtc {
 
 function Invoke-Snapshot {
     Param($Path)
+    $config = Get-Config
 
-    "calling `"restic backup '$Path'`"..."
-    restic backup $backupLocation
+    $backupParams = @($config.restic.backupOptions)
+    $backupParams += @($Path)
+    "calling `"restic backup $((JoinParameterString $backupParams))`"..."
+    #restic backup @backupParams
 
-    $forgetParams = $config.ResticForgetOptions
+    $forgetParams = @($config.restic.forgetOptions)
     "calling `"restic forget $((JoinParameterString $forgetParams))`"..."
-    restic forget @forgetParams
+    #restic forget @forgetParams
 }
 
 
@@ -372,7 +382,7 @@ function Format-ByteSize {
 
     $magnitude = [System.Math]::Floor([System.Math]::Log($Size, 1024))
     $readableSize = [System.Math]::Round(($Size / [System.Math]::Pow(1024, $magnitude)), 1)
-    return "$($readableSize)$(@('B', 'KB', 'MB', 'GB', 'TB', 'EB')[$magnitude])"
+    return "$($readableSize)$(@('B', 'KB', 'MB', 'GB', 'TB', 'PB')[$magnitude])"
 }
 
 
