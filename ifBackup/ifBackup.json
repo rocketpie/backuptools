@@ -1,0 +1,34 @@
+{
+    "log": {
+        "path": "/media/backups/log",
+        "retainLogs": "30:00:00:00"
+    },
+    "snapshots": [
+        {
+            "path": "/media/backups/drop",
+            "recurseDepth": 1,
+            "idleTimeout": "00:10:00"
+        },
+        {
+            "path": "/media/backups/sftp-share",
+            "recurseDepth": 2,
+            "idleTimeout": "00:10:00"
+        }
+    ],
+    "restic": {
+        "repositoryPath": "/media/backups/restic-repository",
+        "password": "",
+        "backupOptions": [
+            "--skip-if-unchanged"
+        ],
+        "forgetOptions": [
+            "--prune",
+            "--keep-last",
+            "2",
+            "--keep-weekly",
+            "2",
+            "--keep-monthly",
+            "3"
+        ]
+    }
+}

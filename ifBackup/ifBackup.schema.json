@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rocketpie/backuptools/ifBackup/ifBackup.schema.json",
+  "title": "ifBackup Configuration",
+  "$types": {
+    "absolutePath": {
+      "type": "string",
+      "pattern": "^/.+",
+      "description": "Absolute POSIX-style path starting with '/'."
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "log",
+    "snapshots",
+    "restic"
+  ],
+  "properties": {
+    "log": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "retainLogs"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$types/absolutePath",
+          "description": "Directory for log files."
+        },
+        "retainLogs": {
+          "type": "string",
+          "pattern": "^\\d{1,3}:\\d{2}:\\d{2}:\\d{2}$",
+          "description": "Retention window for logs (DD:HH:MM:SS)."
+        }
+      }
+    },
+    "snapshots": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "idleTimeout"
+        ],
+        "properties": {
+          "path": {
+            "$ref": "#/$types/absolutePath",
+            "description": "Directory to snapshot."
+          },
+          "idleTimeout": {
+            "type": "string",
+            "pattern": "^\\d{2}:\\d{2}:\\d{2}$",
+            "description": "Inactivity threshold before snapshot (HH:MM:SS)."
+          },
+          "recurseDepth": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2,
+            "description": "Max recursion depth; 0 = only the directory itself (default)."
+          }
+        }
+      }
+    },
+    "restic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repositoryPath",
+        "password",
+        "backupOptions",
+        "forgetOptions"
+      ],
+      "properties": {
+        "repositoryPath": {
+          "$ref": "#/$types/absolutePath",
+          "description": "Restic repository path."
+        },
+        "password": {
+          "type": "string",
+          "description": "Restic repository password."
+        },
+        "backupOptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Extra restic backup flags, each as a separate item (e.g., \"--skip-if-unchanged\")."
+        },
+        "forgetOptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Arguments for 'restic forget' (flags and values as separate items, preserving order)."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "log": {
+        "path": "/media/backups/log",
+        "retainLogs": "30:00:00:00"
+      },
+      "snapshots": [
+        {
+          "path": "/media/backups/sftp-share",
+          "recurseDepth": 2,
+          "idleTimeout": "00:10:00"
+        }
+      ],
+      "restic": {
+        "repositorypath": "/media/backups/restic-repository",
+        "password": "",
+        "backupOptions": [
+          "--skip-if-unchanged"
+        ],
+        "forgetOptions": [
+          "--keep-last",
+          "2",
+          "--keep-weekly",
+          "2",
+          "--keep-monthly",
+          "3"
+        ]
+      }
+    }
+  ]
+}
