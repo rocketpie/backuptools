@@ -6,6 +6,11 @@
 #>
 [CmdletBinding()]
 Param(
+    # read the configuration file and set the restic environment variables
+    [Parameter(Mandatory, ParameterSetName = "SetResticEnvironmentVariables")]
+    [switch]$SetResticEnvironmentVariables,
+
+    [Parameter(ParameterSetName = "Start")]
     [switch]$Start
 )
 
@@ -17,16 +22,21 @@ if ($PSBoundParameters['Debug']) {
 }
 
 $thisFileName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Definition)
-$thisFileVersion = "0.1"
+$thisFileVersion = "0.4"
 Set-Variable -Name "ThisFileName" -Value $thisFileName -Scope Script
 Set-Variable -Name "ThisFileVersion" -Value $thisFileVersion -Scope Script
 "$($thisFileName) $($thisFileVersion)"
 
 function Main {
-    $logFilePath = Initialize-LogFile
-
-    Initialize *>&1 | Out-Logged -LogfilePath $logFilePath
+    "checking config..."
+    $config = Read-ConfigFile
     
+    "Test-WriteAccess '$($config.log.path)'"
+    Test-WriteAccess -Path $config.log.path
+
+    $logFilePath = Initialize-LogFile -LogPath $config.log.path
+
+    Initialize *>&1 | Out-Logged -LogfilePath $logFilePath    
     if ($true -ne (Get-Variable -Name "Initialized" -ValueOnly -ErrorAction SilentlyContinue)) {
         return 
     }
@@ -37,12 +47,6 @@ function Main {
 
 function Initialize {
     try {
-        "checking config..."
-        $config = Read-ConfigFile
-    
-        "Test-WriteAccess '$($config.log.path)'"
-        Test-WriteAccess -Path $config.log.path
-
         foreach ($source in $config.snapshots) {
             $sourcePaths = Get-ChildDirectories -Path $source.path -Recuresdepth $source.recurseDepth
             foreach ($path in $sourcePaths) {
@@ -165,12 +169,10 @@ function Remove-ExpiredLogFiles {
 
 function Initialize-LogFile {
     Param(
-        [string]$OverrideFilename
+        [string]$LogPath
     )
-    $config = Get-Config
-
     $thisFileName = Get-Variable -Name "ThisFileName" -ValueOnly
-    $logFilePath = Join-Path $config.log.path "$($thisFileName)-$(Get-Date -AsUTC -Format 'yyyy-MM-dd').log"
+    $logFilePath = Join-Path $LogPath "$($thisFileName)-$(Get-Date -AsUTC -Format 'yyyy-MM-dd').log"
 
     $thisFileVersion = Get-Variable -Name "ThisFileVersion" -ValueOnly
     if (Test-Path $LogfilePath) {
@@ -178,10 +180,12 @@ function Initialize-LogFile {
         Add-Content -LiteralPath $LogfilePath -Encoding utf8NoBOM -Value "`n`n`n`n`n$(Join-Path $PSScriptRoot $thisFileName).ps1 $($thisFileVersion)" | Out-Null
     }
     else {
+        # create a new file
         Set-Content -LiteralPath $LogfilePath -Encoding utf8NoBOM -Value "$(Join-Path $PSScriptRoot $thisFileName).ps1 $($thisFileVersion)" | Out-Null
     }
+    Add-Content -LiteralPath $LogfilePath -Encoding utf8NoBOM -Value "log time $(Get-Date -AsUTC -Format "HH:mm:ss") UTC is $(Get-Date -Format "HH:mm:ss") local time"
 
-    "log time $(Get-Date -AsUTC -Format "HH:mm:ss") UTC is $(Get-Date -Format "HH:mm:ss") local time" | Out-Logged -LogFilePath $logFilePath | Out-Null
+    return $logFilePath
 }
 
 # read the .json config file
@@ -199,6 +203,7 @@ function Read-ConfigFile {
     Set-Variable -Name "Config" -Value $config -Scope Script
     return $config # default pass-through
 }
+
 function Get-Config { return Get-Variable -Name "Config" -ValueOnly }
 
 
@@ -385,7 +390,18 @@ function Format-ByteSize {
     return "$($readableSize)$(@('B', 'KB', 'MB', 'GB', 'TB', 'PB')[$magnitude])"
 }
 
+switch ($PSCmdlet.ParameterSetName) {
+    SetResticEnvironmentVariables {
+        $config = Read-ConfigFile
+        
+        # set restic environment variables
+        $env:RESTIC_REPOSITORY = $config.restic.repositoryPath
+        $env:RESTIC_PASSWORD = $config.restic.password
+    }
 
-if ($Start) {
-    Main
+    Start {
+        if ($Start) { 
+            Main 
+        }
+    }
 }
